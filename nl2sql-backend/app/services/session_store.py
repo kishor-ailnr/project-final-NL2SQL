@@ -34,22 +34,15 @@ def get_session(session_id: str) -> Optional[Dict[str, Any]]:
                     "database_url": cached["database_url"],
                     "tables": cached["tables"],
                     "schema": cached["schema"],
+                    "sample_values": cached.get("sample_values", {}),
                 }
                 SESSION_STORE[session_id] = restored
                 return restored
         elif record and record.db_type.startswith("upload_"):
             db_path = DATA_DIR / f"{record.db_type}.db"
             if db_path.exists():
-                demo_engine = create_engine(
-                    f"sqlite:///{db_path.as_posix()}",
-                    connect_args={"check_same_thread": False},
-                )
-                inspector = inspect(demo_engine)
-                table_names = inspector.get_table_names()
-                schema_info = {
-                    t: [{"name": col["name"], "type": str(col["type"])} for col in inspector.get_columns(t)]
-                    for t in table_names
-                }
+                from app.routers.connect_db import inspect_db_schema_and_samples
+                table_names, schema_info, sample_values_map = inspect_db_schema_and_samples(db_path)
                 restored = {
                     "db_type": "upload",
                     "upload_name": record.db_type,
@@ -57,6 +50,7 @@ def get_session(session_id: str) -> Optional[Dict[str, Any]]:
                     "database_url": f"sqlite:///{db_path.as_posix()}",
                     "tables": table_names,
                     "schema": schema_info,
+                    "sample_values": sample_values_map,
                 }
                 SESSION_STORE[session_id] = restored
                 return restored

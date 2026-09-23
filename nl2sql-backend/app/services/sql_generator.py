@@ -59,11 +59,29 @@ def _clean_json_string(text: str) -> str:
     return cleaned
 
 
-def _format_schema_for_prompt(schema: Dict[str, Any]) -> str:
-    """Format schema dictionary into readable text for the prompt."""
+def _format_schema_for_prompt(schema: Dict[str, Any], sample_values_map: Optional[Dict[str, Any]] = None) -> str:
+    """Format schema dictionary into readable text for the prompt, including sample values."""
     schema_lines = []
     for table, cols in schema.items():
-        col_strs = [f"{c['name']} ({c['type']})" for c in cols]
+        col_strs = []
+        for c in cols:
+            col_name = c.get("name", "")
+            col_type = c.get("type", "")
+            samples = c.get("sample_values")
+            if not samples and sample_values_map and table in sample_values_map:
+                samples = sample_values_map[table].get(col_name)
+            samples = samples or []
+            if samples:
+                samples_str = ", ".join(repr(s) if isinstance(s, str) else str(s) for s in samples)
+                if col_type:
+                    col_strs.append(f"{col_name} ({col_type}, sample values: {samples_str})")
+                else:
+                    col_strs.append(f"{col_name} (sample values: {samples_str})")
+            else:
+                if col_type:
+                    col_strs.append(f"{col_name} ({col_type})")
+                else:
+                    col_strs.append(col_name)
         schema_lines.append(f"Table '{table}': {', '.join(col_strs)}")
     return "\n".join(schema_lines)
 
@@ -86,7 +104,8 @@ def generate_sql(session_id: str, nl_question: str) -> Dict[str, Any]:
         raise ValueError(f"Session '{session_id}' not found. Please connect to a database first.")
 
     schema = session.get("schema", {})
-    schema_str = _format_schema_for_prompt(schema)
+    sample_values_map = session.get("sample_values")
+    schema_str = _format_schema_for_prompt(schema, sample_values_map)
 
     base_prompt = f"""You are an expert SQLite SQL engineer.
 Given the following SQLite database schema:
@@ -97,7 +116,8 @@ User Question: "{nl_question}"
 Instructions:
 1. Generate a valid, executable SQLite query that accurately answers the user's question. If the user asks to delete, insert, or update data, generate that query directly.
 2. Return ONLY a single valid JSON object. Do not include markdown code fences (```json or ```), backticks, or any introductory or concluding text.
-3. The JSON object must strictly have this exact structure:
+3. Pay close attention to the sample values provided for each column. When filtering on text/categorical columns (such as '1st year', '2nd year'), match the exact text format shown in the sample values rather than assuming numeric values.
+4. The JSON object must strictly have this exact structure:
 {{
   "sql": "SQL query here",
   "explanation": "Brief explanation of why this query answers the question",
@@ -142,7 +162,9 @@ Database Schema:
 
 User Question: "{nl_question}"
 
-CRITICAL: Output ONLY raw valid JSON without any markdown formatting, backticks, or extra text.
+Instructions:
+1. Pay close attention to the sample values provided for each column and match exact text formats.
+2. CRITICAL: Output ONLY raw valid JSON without any markdown formatting, backticks, or extra text.
 Format:
 {{
   "sql": "SQL query here",
