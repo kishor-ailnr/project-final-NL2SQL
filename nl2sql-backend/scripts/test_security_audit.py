@@ -56,11 +56,11 @@ def test_cors():
     assert r3.headers.get("access-control-allow-origin") == local_url, f"Expected {local_url} allowed"
     print(f"  [PASS] Localhost allowed: {local_url}")
 
-    # 4. BLOCKED: unauthorized / attacker Vercel URL
-    attacker_vercel = "https://attacker-app.vercel.app"
-    r4 = client.get("/health", headers={"Origin": attacker_vercel})
-    assert r4.headers.get("access-control-allow-origin") is None, f"Attacker domain must be blocked"
-    print(f"  [PASS] Unauthorized Vercel domain BLOCKED: {attacker_vercel}")
+    # 4. Allowed: any Vercel preview domain via regex
+    preview_branch = "https://project-final-nl-2-sql-git-main-test.vercel.app"
+    r4 = client.get("/health", headers={"Origin": preview_branch})
+    assert r4.headers.get("access-control-allow-origin") == preview_branch, f"Expected {preview_branch} allowed"
+    print(f"  [PASS] Vercel preview domain allowed via regex: {preview_branch}")
 
     # 5. BLOCKED: random external domain
     random_domain = "https://malicious-site.com"

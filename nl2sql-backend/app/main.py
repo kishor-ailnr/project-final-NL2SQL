@@ -30,16 +30,12 @@ origins = [
     "http://localhost:5173",
     "http://localhost:3000",
     "https://project-final-nl-2-sql.vercel.app",
-    "https://project-final-nl-2-nrfu08t13-kishor-ailnrs-projects.vercel.app",
 ]
-
-# Match project production domain, preview branches, and user-specific Vercel URLs
-ALLOW_ORIGIN_REGEX = r"https://(project-final-nl-2[a-zA-Z0-9_-]*|.*kishor-ailnrs-projects)\.vercel\.app"
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
-    allow_origin_regex=ALLOW_ORIGIN_REGEX,
+    allow_origin_regex=r"https://.*\.vercel\.app",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
