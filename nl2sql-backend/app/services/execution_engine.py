@@ -1,7 +1,10 @@
+import logging
 import sqlite3
 from pathlib import Path
 from typing import List, Dict, Any, Union
 from app.services.session_store import get_session
+
+logger = logging.getLogger(__name__)
 
 
 def run_select(session_id: str, sql: str) -> Union[List[Dict[str, Any]], Dict[str, str]]:
@@ -12,11 +15,12 @@ def run_select(session_id: str, sql: str) -> Union[List[Dict[str, Any]], Dict[st
     """
     session = get_session(session_id)
     if not session:
-        return {"error": f"Session '{session_id}' not found. Please connect first."}
+        return {"error": "Active session not found. Please connect to a database first."}
 
     db_path = session.get("db_path")
     if not db_path or not Path(db_path).exists():
-        return {"error": f"Database file not found at '{db_path}'."}
+        logger.error("Target database file missing from disk for session '%s' at path: %s", session_id, db_path)
+        return {"error": "Database file could not be accessed. Please reconnect to the database."}
 
     conn = None
     try:
@@ -27,7 +31,12 @@ def run_select(session_id: str, sql: str) -> Union[List[Dict[str, Any]], Dict[st
         rows = cursor.fetchall()
         return [dict(row) for row in rows]
     except Exception as exc:
-        return {"error": str(exc)}
+        logger.error("Database query execution error for session '%s': %s", session_id, exc, exc_info=True)
+        err_msg = str(exc)
+        # Avoid leaking server file paths if present in error message
+        if "data" in err_msg or "\\" in err_msg or "/" in err_msg:
+            err_msg = "Database syntax or execution error."
+        return {"error": err_msg}
     finally:
         if conn:
             try:

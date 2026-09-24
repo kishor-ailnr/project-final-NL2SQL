@@ -1,4 +1,6 @@
 import logging
+import time
+from collections import defaultdict
 from datetime import datetime
 from typing import List, Dict, Any, Optional, Union
 from fastapi import APIRouter, HTTPException, Depends
@@ -14,6 +16,40 @@ from app.services.session_store import get_session
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+# In-memory sliding window rate limiter: session_id -> list of float timestamps
+_QUERY_TIMESTAMPS: Dict[str, List[float]] = defaultdict(list)
+RATE_LIMIT_PER_MINUTE = 20
+WINDOW_SECONDS = 60.0
+
+
+def check_rate_limit(session_id: str) -> None:
+    """Enforce in-memory rate limiting of 20 queries per minute per session_id."""
+    now = time.time()
+    cutoff = now - WINDOW_SECONDS
+    timestamps = [t for t in _QUERY_TIMESTAMPS[session_id] if t > cutoff]
+
+    if len(timestamps) >= RATE_LIMIT_PER_MINUTE:
+        retry_after = int(WINDOW_SECONDS - (now - timestamps[0])) + 1
+        logger.warning(
+            "Rate limit exceeded for session_id '%s' (%d requests in 60s). Retry after %ds",
+            session_id,
+            len(timestamps),
+            retry_after,
+        )
+        raise HTTPException(
+            status_code=429,
+            detail="Rate limit exceeded. Maximum 20 queries per minute per session. Please wait a moment before trying again.",
+            headers={"Retry-After": str(max(1, retry_after))},
+        )
+
+    timestamps.append(now)
+    _QUERY_TIMESTAMPS[session_id] = timestamps
+
+
+def reset_rate_limits() -> None:
+    """Reset rate limiter state (used for testing)."""
+    _QUERY_TIMESTAMPS.clear()
 
 
 class QueryRequest(BaseModel):
@@ -73,11 +109,14 @@ def handle_query(
     db: Session = Depends(get_db_session),
 ):
     """Translate natural language to SQL, validate it, execute it, and record history."""
+    # 0. Enforce Rate Limiting (20 queries / min per session_id)
+    check_rate_limit(payload.session_id)
+
     session = get_session(payload.session_id)
     if not session:
         raise HTTPException(
             status_code=404,
-            detail=f"Session '{payload.session_id}' not found. Please connect to a database first.",
+            detail="Active session not found. Please connect to a database first.",
         )
 
     # 1. Generate SQL using Gemini
@@ -97,11 +136,11 @@ def handle_query(
         if "429" in err_msg or "quota" in err_msg.lower() or "toomanyrequests" in type(exc).__name__.lower():
             raise HTTPException(
                 status_code=429,
-                detail=f"Gemini API rate limit or quota exceeded: {err_msg}",
+                detail="AI service rate limit or quota exceeded. Please wait a moment and try again.",
             )
         raise HTTPException(
             status_code=500,
-            detail=f"Error generating SQL: {err_msg}",
+            detail="Failed to generate SQL query for this question. Please try rephrasing your question.",
         )
 
     sql = gen_data.get("sql", "")

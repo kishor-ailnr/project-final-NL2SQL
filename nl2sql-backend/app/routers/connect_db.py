@@ -166,9 +166,10 @@ def connect_database(
 
     cached_demo = get_demo_schema(demo_name)
     if not cached_demo:
+        logger.error("Demo database '%s' not found on disk at DATA_DIR", demo_name)
         raise HTTPException(
             status_code=404,
-            detail=f"Database file 'demo_{demo_name}.db' not found in data directory. Please ensure it is seeded.",
+            detail=f"Database for '{demo_name}' is currently unavailable. Please ensure it is seeded.",
         )
 
     table_names = cached_demo["tables"]
@@ -302,9 +303,10 @@ async def upload_database(
                 db_path.unlink()
             except Exception:
                 pass
+        logger.error("Failed to parse uploaded file '%s': %s", filename, exc, exc_info=True)
         raise HTTPException(
             status_code=400,
-            detail=f"This file couldn't be read as a valid CSV/SQLite file: {str(exc)}",
+            detail="This file could not be read as a valid CSV or SQLite file. Please check file format and encoding.",
         )
 
     # Inspect schema with SQLAlchemy and extract sample values
