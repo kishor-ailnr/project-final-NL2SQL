@@ -121,17 +121,32 @@ Given the following SQLite database schema:
 User Question: "{nl_question}"
 
 Instructions:
-1. Clarification & Ambiguity Assessment:
-   Before generating SQL, decide whether the user's question requires clarification. Set "needs_clarification" to true when:
-   - A ranking word is used ("top", "best", "highest", "most", "lowest") without specifying BOTH a metric to rank by AND a number/limit (for example: "give me the top patients" is ambiguous, whereas "top 5 patients by number of appointments" specifies both metric and limit and is NOT ambiguous).
-   - A vague qualitative term is used with no defined criteria ("important", "recent", "significant", "good", "bad") without a clear threshold or timeframe (for example: "show me important doctors" is ambiguous).
-   - The question could reasonably map to more than one table or column and the correct one cannot be inferred from the schema or sample values.
-   Otherwise, if the question has clear criteria or explicit filtering (for example: "list all patients older than 40"), set "needs_clarification" to false.
+1. Language & Dialect Understanding (English, Tamil, and Thanglish):
+   - The user's question may be written in:
+     a) English (e.g. "list all patients older than 40")
+     b) Tamil in Tamil script (e.g. "40 வயதுக்கு மேற்பட்ட அனைத்து நோயாளிகளையும் பட்டியலிடுங்கள்")
+     c) Thanglish (Tamil words written in Latin/English script, possibly mixed with English words, e.g. "40 vayasuku mela irukra patients ellam kaatu", "doctor ellam list pannu", "top patients yaaru")
+   - Understand the intent accurately regardless of which of these three forms is used.
+   - Thanglish calibrations:
+     - "40 vayasuku mela patients kaatu" or "40 vayasuku mela irukra patients ellam kaatu" means "show/list patients older than 40" (filter: WHERE age > 40 on patients table).
+     - "doctor ellam list pannu" or "doctor list kudu" means "list all doctors" (SELECT * FROM doctors).
+     - "top patients yaaru" means "who are the top patients" (ambiguous ranking if metric and limit are not specified).
+   - Output Language Rules:
+     - If the user asked in Thanglish, write the "explanation" (and "clarification_question" if applicable) in clean, simple English. Never attempt to generate Thanglish responses.
+     - If the user asked in Tamil script, you may provide the explanation in Tamil script or clean English.
+     - If the user asked in English, provide the explanation in English.
 
-2. Structure Rules based on "needs_clarification":
+2. Clarification & Ambiguity Assessment:
+   Before generating SQL, decide whether the user's question requires clarification. Set "needs_clarification" to true when:
+   - A ranking word is used ("top", "best", "highest", "most", "lowest", "yaaru top", etc.) without specifying BOTH a metric to rank by AND a number/limit (for example: "give me the top patients" or "top patients yaaru" is ambiguous, whereas "top 5 patients by number of appointments" specifies both metric and limit and is NOT ambiguous).
+   - A vague qualitative term is used with no defined criteria ("important", "recent", "significant", "good", "bad", "mukkiyamaana") without a clear threshold or timeframe (for example: "show me important doctors" or "முக்கியமான மருத்துவர்களைக் காட்டு" is ambiguous).
+   - The question could reasonably map to more than one table or column and the correct one cannot be inferred from the schema or sample values.
+   Otherwise, if the question has clear criteria or explicit filtering (for example: "list all patients older than 40" or "40 vayasuku mela irukra patients ellam kaatu"), set "needs_clarification" to false.
+
+3. Structure Rules based on "needs_clarification":
    - If "needs_clarification" is true:
      - "needs_clarification": true
-     - "clarification_question": a short, specific, polite question asking the user to clarify the ambiguity (e.g., "How would you like to define top patients (e.g. by appointment count or total billing), and how many would you like to see?").
+     - "clarification_question": a short, specific, polite question asking the user to clarify the ambiguity (in clean English or Tamil script, never Thanglish).
      - "sql": null
      - "explanation": null
      - "confidence": a float below 0.5 (e.g. 0.2 or 0.3)
@@ -139,10 +154,10 @@ Instructions:
      - "needs_clarification": false
      - "clarification_question": null
      - "sql": a valid, executable SQLite query that accurately answers the question. If filtering on text/categorical columns (such as '1st year', '2nd year'), match the exact text format shown in the sample values. For top N queries, include appropriate ORDER BY and LIMIT.
-     - "explanation": a brief explanation of how the query answers the question.
+     - "explanation": a concise explanation of how the query answers the question (in clean English or Tamil script).
      - "confidence": a float between 0.7 and 1.0.
 
-3. CRITICAL: Return ONLY a single valid JSON object. Do not include markdown code fences (```json or ```), backticks, or any introductory or concluding text.
+4. CRITICAL: Return ONLY a single valid JSON object. Do not include markdown code fences (```json or ```), backticks, or any introductory or concluding text.
 Format:
 {{
   "needs_clarification": false,
