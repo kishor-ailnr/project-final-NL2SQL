@@ -86,7 +86,7 @@ def _format_schema_for_prompt(schema: Dict[str, Any], sample_values_map: Optiona
     return "\n".join(schema_lines)
 
 
-def generate_sql(session_id: str, nl_question: str) -> Dict[str, Any]:
+def generate_sql(session_id: str, nl_question: str, language: str = "en") -> Dict[str, Any]:
     """Generate SQL from natural language question using Gemini with clarification and model fallback.
     
     Returns:
@@ -100,7 +100,8 @@ def generate_sql(session_id: str, nl_question: str) -> Dict[str, Any]:
     """
     global _WORKING_MODEL
 
-    cache_key = f"{session_id}:{nl_question.strip().lower()}"
+    norm_lang = (language or "en").lower().strip()
+    cache_key = f"{session_id}:{norm_lang}:{nl_question.strip().lower()}"
     if cache_key in _QUERY_CACHE:
         logger.info("Serving SQL generation from query cache for: %s", cache_key)
         return dict(_QUERY_CACHE[cache_key])

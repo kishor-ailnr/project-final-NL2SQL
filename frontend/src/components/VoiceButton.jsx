@@ -1,88 +1,203 @@
 import { useState, useRef, useEffect } from 'react';
 
-export default function VoiceButton({ onRecordingComplete, disabled }) {
+// Browser-safe check for Web Speech API
+const SpeechRecognition =
+  typeof window !== 'undefined'
+    ? window.SpeechRecognition || window.webkitSpeechRecognition
+    : null;
+
+export default function VoiceButton({
+  onRecordingComplete,
+  onTranscript,
+  language = 'en',
+  onLanguageChange,
+  disabled = false,
+}) {
+  // Session language state ('en' or 'ta')
+  const [internalLanguage, setInternalLanguage] = useState('en');
+  const currentLang = onLanguageChange ? language : internalLanguage;
+
   const [isRecording, setIsRecording] = useState(false);
   const [errorMessage, setErrorMessage] = useState(null);
+  const [isSupported, setIsSupported] = useState(true);
 
-  const mediaRecorderRef = useRef(null);
-  const streamRef = useRef(null);
-  const audioChunksRef = useRef([]);
+  // Single recognition instance stored in a ref (created once)
+  const recognitionRef = useRef(null);
+  // Boolean guard ref to track actual recognition lifecycle
+  const isListeningRef = useRef(false);
 
-  // Cleanup stream on unmount
+  const handleLanguageChange = (newLang) => {
+    // If currently listening, stop previous session before switching language
+    if (isListeningRef.current && recognitionRef.current) {
+      try {
+        recognitionRef.current.stop();
+      } catch (e) {
+        // ignore
+      }
+    }
+    if (onLanguageChange) {
+      onLanguageChange(newLang);
+    } else {
+      setInternalLanguage(newLang);
+    }
+  };
+
+  // Initialize SpeechRecognition once on mount
   useEffect(() => {
-    return () => {
-      if (streamRef.current) {
-        streamRef.current.getTracks().forEach((track) => track.stop());
+    if (!SpeechRecognition) {
+      setIsSupported(false);
+      return;
+    }
+
+    const recognition = new SpeechRecognition();
+    recognition.continuous = false; // Capture full sentence/utterance
+    recognition.interimResults = false;
+    recognition.maxAlternatives = 1;
+    recognition.lang = currentLang === 'ta' ? 'ta-IN' : 'en-IN';
+
+    recognition.onstart = () => {
+      isListeningRef.current = true;
+      setIsRecording(true);
+      setErrorMessage(null);
+    };
+
+    recognition.onresult = (event) => {
+      if (event.results && event.results.length > 0) {
+        const transcript = event.results[0][0].transcript;
+        if (transcript && transcript.trim()) {
+          const text = transcript.trim();
+          if (onTranscript) onTranscript(text, currentLang);
+          if (onRecordingComplete) onRecordingComplete(text, currentLang);
+        }
       }
     };
-  }, []);
 
-  const startRecording = async () => {
-    setErrorMessage(null);
-    audioChunksRef.current = [];
-
-    try {
-      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-        throw new Error('Microphone access is not supported in this browser.');
-      }
-
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      streamRef.current = stream;
-
-      const recorder = new MediaRecorder(stream);
-      mediaRecorderRef.current = recorder;
-
-      recorder.ondataavailable = (event) => {
-        if (event.data && event.data.size > 0) {
-          audioChunksRef.current.push(event.data);
-        }
-      };
-
-      recorder.onstop = () => {
-        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
-        if (onRecordingComplete) {
-          onRecordingComplete(audioBlob);
-        }
-        // Stop all tracks to release mic hardware
-        if (streamRef.current) {
-          streamRef.current.getTracks().forEach((track) => track.stop());
-          streamRef.current = null;
-        }
-        setIsRecording(false);
-      };
-
-      recorder.start();
-      setIsRecording(true);
-    } catch (err) {
-      console.warn('Voice recording error:', err);
-      setErrorMessage('Microphone access denied. Please allow mic permissions and try again.');
+    recognition.onerror = (event) => {
+      console.warn('SpeechRecognition error:', event.error);
+      isListeningRef.current = false;
       setIsRecording(false);
-      if (streamRef.current) {
-        streamRef.current.getTracks().forEach((track) => track.stop());
-        streamRef.current = null;
-      }
-    }
-  };
 
-  const stopRecording = () => {
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
-      mediaRecorderRef.current.stop();
+      // Gracefully ignore benign / user-initiated abort or silence
+      if (event.error === 'aborted' || event.error === 'no-speech') {
+        return;
+      }
+
+      if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
+        setErrorMessage('Microphone access denied. Please allow microphone permissions.');
+      } else if (event.error === 'network') {
+        setErrorMessage('Speech recognition network error. Please try again.');
+      } else {
+        setErrorMessage(`Voice recognition error: ${event.error}`);
+      }
+    };
+
+    recognition.onend = () => {
+      isListeningRef.current = false;
+      setIsRecording(false);
+    };
+
+    recognitionRef.current = recognition;
+
+    return () => {
+      if (recognitionRef.current) {
+        try {
+          recognitionRef.current.abort();
+        } catch (e) {
+          // ignore
+        }
+        recognitionRef.current = null;
+      }
+      isListeningRef.current = false;
+    };
+  }, []); // Run once on mount
+
+  // Keep recognition.lang updated when currentLang changes
+  useEffect(() => {
+    if (recognitionRef.current) {
+      recognitionRef.current.lang = currentLang === 'ta' ? 'ta-IN' : 'en-IN';
     }
-  };
+  }, [currentLang]);
 
   const handleClick = (e) => {
     e.preventDefault();
     if (disabled) return;
 
-    if (isRecording) {
-      stopRecording();
+    if (!isSupported) {
+      setErrorMessage('Speech recognition is not supported in this browser. Please use Google Chrome or Microsoft Edge.');
+      return;
+    }
+
+    const recognition = recognitionRef.current;
+    if (!recognition) return;
+
+    if (isListeningRef.current) {
+      // Safely stop existing active session
+      try {
+        recognition.stop();
+      } catch (err) {
+        console.warn('SpeechRecognition stop error:', err);
+        try {
+          recognition.abort();
+        } catch (e) {
+          // ignore
+        }
+      }
+      isListeningRef.current = false;
+      setIsRecording(false);
     } else {
-      startRecording();
+      // Guarded start
+      setErrorMessage(null);
+      try {
+        recognition.lang = currentLang === 'ta' ? 'ta-IN' : 'en-IN';
+        recognition.start();
+      } catch (err) {
+        console.warn('SpeechRecognition start error:', err);
+        // If already started or in transition, abort and reset
+        if (err.name === 'InvalidStateError' || err.message?.includes('already started')) {
+          try {
+            recognition.abort();
+          } catch (e) {
+            // ignore
+          }
+        }
+        isListeningRef.current = false;
+        setIsRecording(false);
+      }
     }
   };
 
   return (
-    <div className="relative inline-flex items-center">
+    <div className="relative inline-flex items-center gap-1.5 shrink-0">
+      {/* Multilingual Toggle (English / தமிழ்) */}
+      <div className="flex items-center p-0.5 sm:p-1 bg-slate-100/90 rounded-2xl border border-slate-200/80 shadow-2xs">
+        <button
+          type="button"
+          onClick={() => handleLanguageChange('en')}
+          disabled={disabled || isRecording}
+          title="Switch voice recognition to English"
+          className={`px-2 py-1 text-xs font-medium rounded-xl transition-all ${
+            currentLang === 'en'
+              ? 'bg-white text-teal-700 font-semibold shadow-xs border border-teal-200/60'
+              : 'text-slate-500 hover:text-slate-800'
+          }`}
+        >
+          English
+        </button>
+        <button
+          type="button"
+          onClick={() => handleLanguageChange('ta')}
+          disabled={disabled || isRecording}
+          title="Switch voice recognition to Tamil (தமிழ்)"
+          className={`px-2 py-1 text-xs font-medium rounded-xl transition-all ${
+            currentLang === 'ta'
+              ? 'bg-white text-teal-700 font-semibold shadow-xs border border-teal-200/60'
+              : 'text-slate-500 hover:text-slate-800'
+          }`}
+        >
+          தமிழ்
+        </button>
+      </div>
+
       {/* Inline Error Popover */}
       {errorMessage && (
         <div className="absolute bottom-full mb-2 right-0 sm:left-1/2 sm:-translate-x-1/2 w-64 p-2.5 bg-rose-600 text-white text-xs rounded-xl shadow-lg border border-rose-500 z-30 flex items-start justify-between gap-2 animate-fadeIn">
@@ -107,7 +222,13 @@ export default function VoiceButton({ onRecordingComplete, disabled }) {
         type="button"
         onClick={handleClick}
         disabled={disabled}
-        title={isRecording ? 'Click to stop recording' : 'Click to speak question'}
+        title={
+          isRecording
+            ? 'Click to stop listening'
+            : currentLang === 'ta'
+            ? 'தமிழில் பேச கிளிக் செய்யவும் (Click to speak in Tamil)'
+            : 'Click to speak question in English'
+        }
         className={`relative p-2.5 sm:p-3 rounded-2xl border transition-all duration-200 shrink-0 flex items-center justify-center ${
           isRecording
             ? 'bg-rose-500 hover:bg-rose-600 text-white border-rose-400 ring-4 ring-rose-200 animate-pulse'

@@ -121,7 +121,7 @@ def handle_query(
 
     # 1. Generate SQL using Gemini (with clarification detection)
     try:
-        gen_data = generate_sql(payload.session_id, payload.text)
+        gen_data = generate_sql(payload.session_id, payload.text, language=payload.language)
     except HTTPException:
         raise
     except Exception as exc:
