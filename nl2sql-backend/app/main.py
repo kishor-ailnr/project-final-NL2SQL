@@ -26,24 +26,15 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[
-        "https://project-final-nl-2-sql.vercel.app",
-    ],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
 origins = [
     "http://localhost:5173",
     "http://localhost:3000",
+    "https://project-final-nl-2-sql.vercel.app",
     "https://project-final-nl-2-nrfu08t13-kishor-ailnrs-projects.vercel.app",
 ]
 
-# Match any preview or deployment subdomain under kishor-ailnrs-projects.vercel.app
-ALLOW_ORIGIN_REGEX = r"https://([a-zA-Z0-9_-]+\.)*kishor-ailnrs-projects\.vercel\.app"
+# Match project production domain, preview branches, and user-specific Vercel URLs
+ALLOW_ORIGIN_REGEX = r"https://(project-final-nl-2[a-zA-Z0-9_-]*|.*kishor-ailnrs-projects)\.vercel\.app"
 
 app.add_middleware(
     CORSMiddleware,

@@ -26,14 +26,26 @@ def test_cors():
     print("  CHECK 1: CORS Configuration & Regex Matching")
     print("=" * 65)
 
-    # 1. Allowed: specific Vercel URL
-    allowed_url = "https://project-final-nl-2-nrfu08t13-kishor-ailnrs-projects.vercel.app"
-    r1 = client.get("/health", headers={"Origin": allowed_url})
-    assert r1.headers.get("access-control-allow-origin") == allowed_url, f"Expected {allowed_url} allowed"
-    print(f"  [PASS] Explicit Vercel domain allowed: {allowed_url}")
+    # 1. Allowed: production Vercel URL
+    prod_url = "https://project-final-nl-2-sql.vercel.app"
+    r1 = client.get("/health", headers={"Origin": prod_url})
+    assert r1.headers.get("access-control-allow-origin") == prod_url, f"Expected {prod_url} allowed"
+    print(f"  [PASS] Production Vercel domain allowed: {prod_url}")
+
+    # 1b. Allowed: OPTIONS preflight check for production domain
+    r1_preflight = client.options(
+        "/api/connect-db",
+        headers={
+            "Origin": prod_url,
+            "Access-Control-Request-Method": "POST",
+            "Access-Control-Request-Headers": "content-type",
+        },
+    )
+    assert r1_preflight.headers.get("access-control-allow-origin") == prod_url, "Preflight must return allow-origin"
+    print(f"  [PASS] OPTIONS preflight to /api/connect-db allowed for: {prod_url}")
 
     # 2. Allowed: dynamic preview under kishor-ailnrs-projects.vercel.app
-    preview_url = "https://project-final-nl2sql-preview-123.kishor-ailnrs-projects.vercel.app"
+    preview_url = "https://project-final-nl-2-nrfu08t13-kishor-ailnrs-projects.vercel.app"
     r2 = client.get("/health", headers={"Origin": preview_url})
     assert r2.headers.get("access-control-allow-origin") == preview_url, f"Expected {preview_url} allowed"
     print(f"  [PASS] Preview subdomain allowed: {preview_url}")
