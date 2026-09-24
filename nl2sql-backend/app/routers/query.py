@@ -60,13 +60,13 @@ class QueryRequest(BaseModel):
 
 class QueryResponse(BaseModel):
     query_id: Union[str, int]
-    sql: str
-    explanation: str
+    sql: Optional[str] = None
+    explanation: Optional[str] = None
     confidence: float
     needs_clarification: bool = False
     clarification_question: Optional[str] = None
     query_type: str = "select"
-    result: List[Any]
+    result: List[Any] = []
     chart_type: str = "none"
 
 
@@ -119,7 +119,7 @@ def handle_query(
             detail="Active session not found. Please connect to a database first.",
         )
 
-    # 1. Generate SQL using Gemini
+    # 1. Generate SQL using Gemini (with clarification detection)
     try:
         gen_data = generate_sql(payload.session_id, payload.text)
     except HTTPException:
@@ -141,6 +141,35 @@ def handle_query(
         raise HTTPException(
             status_code=500,
             detail="Failed to generate SQL query for this question. Please try rephrasing your question.",
+        )
+
+    # Handle clarification needed before validation or execution
+    if gen_data.get("needs_clarification", False):
+        clarification_q = gen_data.get("clarification_question") or "Could you please clarify your request?"
+        confidence = float(gen_data.get("confidence", 0.3))
+
+        query_record = QueryHistoryModel(
+            session_id=payload.session_id,
+            nl_query=payload.text,
+            generated_sql="-- Needs clarification: " + clarification_q,
+            confidence=confidence,
+            query_type="clarification",
+            created_at=datetime.utcnow(),
+        )
+        db.add(query_record)
+        db.commit()
+        db.refresh(query_record)
+
+        return QueryResponse(
+            query_id=str(query_record.id),
+            sql=None,
+            explanation=None,
+            confidence=confidence,
+            needs_clarification=True,
+            clarification_question=clarification_q,
+            query_type="select",
+            result=[],
+            chart_type="none",
         )
 
     sql = gen_data.get("sql", "")

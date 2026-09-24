@@ -87,10 +87,16 @@ def _format_schema_for_prompt(schema: Dict[str, Any], sample_values_map: Optiona
 
 
 def generate_sql(session_id: str, nl_question: str) -> Dict[str, Any]:
-    """Generate SQL from natural language question using Gemini with model fallback.
+    """Generate SQL from natural language question using Gemini with clarification and model fallback.
     
     Returns:
-        dict: {"sql": str, "explanation": str, "confidence": float}
+        dict: {
+            "needs_clarification": bool,
+            "clarification_question": Optional[str],
+            "sql": Optional[str],
+            "explanation": Optional[str],
+            "confidence": float
+        }
     """
     global _WORKING_MODEL
 
@@ -107,20 +113,41 @@ def generate_sql(session_id: str, nl_question: str) -> Dict[str, Any]:
     sample_values_map = session.get("sample_values")
     schema_str = _format_schema_for_prompt(schema, sample_values_map)
 
-    base_prompt = f"""You are an expert SQLite SQL engineer.
+    base_prompt = f"""You are an expert SQLite SQL engineer and database analyst.
 Given the following SQLite database schema:
 {schema_str}
 
 User Question: "{nl_question}"
 
 Instructions:
-1. Generate a valid, executable SQLite query that accurately answers the user's question. If the user asks to delete, insert, or update data, generate that query directly.
-2. Return ONLY a single valid JSON object. Do not include markdown code fences (```json or ```), backticks, or any introductory or concluding text.
-3. Pay close attention to the sample values provided for each column. When filtering on text/categorical columns (such as '1st year', '2nd year'), match the exact text format shown in the sample values rather than assuming numeric values.
-4. The JSON object must strictly have this exact structure:
+1. Clarification & Ambiguity Assessment:
+   Before generating SQL, decide whether the user's question requires clarification. Set "needs_clarification" to true when:
+   - A ranking word is used ("top", "best", "highest", "most", "lowest") without specifying BOTH a metric to rank by AND a number/limit (for example: "give me the top patients" is ambiguous, whereas "top 5 patients by number of appointments" specifies both metric and limit and is NOT ambiguous).
+   - A vague qualitative term is used with no defined criteria ("important", "recent", "significant", "good", "bad") without a clear threshold or timeframe (for example: "show me important doctors" is ambiguous).
+   - The question could reasonably map to more than one table or column and the correct one cannot be inferred from the schema or sample values.
+   Otherwise, if the question has clear criteria or explicit filtering (for example: "list all patients older than 40"), set "needs_clarification" to false.
+
+2. Structure Rules based on "needs_clarification":
+   - If "needs_clarification" is true:
+     - "needs_clarification": true
+     - "clarification_question": a short, specific, polite question asking the user to clarify the ambiguity (e.g., "How would you like to define top patients (e.g. by appointment count or total billing), and how many would you like to see?").
+     - "sql": null
+     - "explanation": null
+     - "confidence": a float below 0.5 (e.g. 0.2 or 0.3)
+   - If "needs_clarification" is false:
+     - "needs_clarification": false
+     - "clarification_question": null
+     - "sql": a valid, executable SQLite query that accurately answers the question. If filtering on text/categorical columns (such as '1st year', '2nd year'), match the exact text format shown in the sample values. For top N queries, include appropriate ORDER BY and LIMIT.
+     - "explanation": a brief explanation of how the query answers the question.
+     - "confidence": a float between 0.7 and 1.0.
+
+3. CRITICAL: Return ONLY a single valid JSON object. Do not include markdown code fences (```json or ```), backticks, or any introductory or concluding text.
+Format:
 {{
-  "sql": "SQL query here",
-  "explanation": "Brief explanation of why this query answers the question",
+  "needs_clarification": false,
+  "clarification_question": null,
+  "sql": "SELECT ...",
+  "explanation": "Brief explanation...",
   "confidence": 0.95
 }}
 """
@@ -163,13 +190,16 @@ Database Schema:
 User Question: "{nl_question}"
 
 Instructions:
-1. Pay close attention to the sample values provided for each column and match exact text formats.
-2. CRITICAL: Output ONLY raw valid JSON without any markdown formatting, backticks, or extra text.
-Format:
+1. Determine if the question needs clarification (e.g. ranking word without metric and limit, or vague terms like 'important' without criteria).
+2. If needs_clarification is true, set sql to null, explanation to null, confidence < 0.5, and provide a short clarification_question.
+3. If needs_clarification is false, generate valid SQLite in sql, explanation, confidence >= 0.5, and clarification_question to null.
+4. Output ONLY raw valid JSON without markdown formatting or backticks:
 {{
-  "sql": "SQL query here",
-  "explanation": "Explanation here",
-  "confidence": 0.9
+  "needs_clarification": true or false,
+  "clarification_question": "..." or null,
+  "sql": "..." or null,
+  "explanation": "..." or null,
+  "confidence": 0.3 or 0.9
 }}
 """
                 retry_res = model.generate_content(retry_prompt, generation_config=gen_config)
@@ -200,14 +230,34 @@ def _validate_result(data: Any) -> None:
     """Ensure result dictionary contains required fields with expected types."""
     if not isinstance(data, dict):
         raise ValueError("Expected JSON object")
-    if "sql" not in data or not isinstance(data["sql"], str):
-        raise ValueError("JSON must include 'sql' string")
-    if "explanation" not in data or not isinstance(data["explanation"], str):
-        raise ValueError("JSON must include 'explanation' string")
-    if "confidence" not in data:
-        data["confidence"] = 0.8
-    else:
+
+    # Normalize needs_clarification
+    needs_clarif = bool(data.get("needs_clarification", False))
+    data["needs_clarification"] = needs_clarif
+
+    if needs_clarif:
+        clarif_q = data.get("clarification_question")
+        if not clarif_q or not isinstance(clarif_q, str) or not clarif_q.strip():
+            data["clarification_question"] = "Could you please clarify your request with more specific criteria?"
+        else:
+            data["clarification_question"] = clarif_q.strip()
+        data["sql"] = None
+        data["explanation"] = None
         try:
-            data["confidence"] = float(data["confidence"])
+            conf = float(data.get("confidence", 0.3))
+            data["confidence"] = min(conf, 0.49)
         except (ValueError, TypeError):
-            data["confidence"] = 0.8
+            data["confidence"] = 0.3
+    else:
+        data["clarification_question"] = None
+        sql = data.get("sql")
+        if not sql or not isinstance(sql, str) or not sql.strip():
+            raise ValueError("JSON must include non-empty 'sql' string when needs_clarification is false")
+        data["sql"] = sql.strip()
+        explanation = data.get("explanation")
+        data["explanation"] = explanation.strip() if isinstance(explanation, str) else ""
+        try:
+            conf = float(data.get("confidence", 0.9))
+            data["confidence"] = max(conf, 0.5)
+        except (ValueError, TypeError):
+            data["confidence"] = 0.9
