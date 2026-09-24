@@ -30,12 +30,13 @@ origins = [
     "http://localhost:5173",
     "http://localhost:3000",
     "https://project-final-nl-2-sql.vercel.app",
+    "https://project-final-nl-2-sql.vercel.app/",
 ]
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
-    allow_origin_regex=r"https://.*\.vercel\.app",
+    allow_origin_regex=r"https://.*\.vercel\.app/?",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
