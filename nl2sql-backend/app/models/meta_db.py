@@ -58,16 +58,6 @@ class QueryHistoryModel(Base):
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
 
-class AuditLogModel(Base):
-    __tablename__ = "audit_log"
-
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    session_id = Column(String, ForeignKey("sessions.id"), nullable=False)
-    sql_executed = Column(Text, nullable=False)
-    rows_affected = Column(Integer, nullable=True)
-    executed_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-
-
 engine = create_engine(
     DATABASE_URL,
     connect_args={"check_same_thread": False, "timeout": 15},

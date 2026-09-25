@@ -1,3 +1,4 @@
+import re
 import logging
 import sqlite3
 from pathlib import Path
@@ -5,6 +6,12 @@ from typing import List, Dict, Any, Union
 from app.services.session_store import get_session
 
 logger = logging.getLogger(__name__)
+
+# Pattern to detect server filesystem paths (Windows drive letters, Unix roots, or .db file references)
+_FILE_PATH_RE = re.compile(
+    r"(?:[a-zA-Z]:[\\/][^\s:\"',;)]+|/(?:home|app|tmp|var|usr|etc|root|data)/[^\s:\"',;)]+|[\w./\\]+\.(?:db|sqlite|sqlite3)\b)",
+    re.IGNORECASE,
+)
 
 
 def run_select(session_id: str, sql: str) -> Union[List[Dict[str, Any]], Dict[str, str]]:
@@ -33,9 +40,11 @@ def run_select(session_id: str, sql: str) -> Union[List[Dict[str, Any]], Dict[st
     except Exception as exc:
         logger.error("Database query execution error for session '%s': %s", session_id, exc, exc_info=True)
         err_msg = str(exc)
-        # Avoid leaking server file paths if present in error message
-        if "data" in err_msg or "\\" in err_msg or "/" in err_msg:
-            err_msg = "Database syntax or execution error."
+        # Avoid leaking server file paths while preserving legitimate error details (e.g. 'datatype mismatch')
+        db_path_str = str(db_path) if db_path else ""
+        if db_path_str and db_path_str in err_msg:
+            err_msg = err_msg.replace(db_path_str, "[database]")
+        err_msg = _FILE_PATH_RE.sub("[database]", err_msg)
         return {"error": err_msg}
     finally:
         if conn:

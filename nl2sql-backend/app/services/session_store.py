@@ -16,7 +16,6 @@ def get_session(session_id: str) -> Optional[Dict[str, Any]]:
     try:
         from app.models.meta_db import SessionLocal, SessionModel
         from app.config import DATA_DIR
-        from sqlalchemy import create_engine, inspect
 
         db = SessionLocal()
         record = db.query(SessionModel).filter(SessionModel.id == session_id).first()
@@ -70,15 +69,5 @@ def set_session(session_id: str, data: Dict[str, Any]) -> None:
         sample_values = data.get("sample_values", {})
         if tables and schema:
             build_schema_index(session_id, tables, schema, sample_values)
-    except Exception:
-        pass
-
-
-def remove_session(session_id: str) -> None:
-    """Remove session data and any associated RAG vector index."""
-    SESSION_STORE.pop(session_id, None)
-    try:
-        from app.services.rag_service import remove_schema_index
-        remove_schema_index(session_id)
     except Exception:
         pass

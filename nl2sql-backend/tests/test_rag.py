@@ -17,10 +17,10 @@ import pytest
 from app.services.rag_service import (
     build_schema_index,
     retrieve_relevant_tables,
-    is_session_indexed,
     remove_schema_index,
+    _SESSION_RAG_STORE,
 )
-from app.services.session_store import set_session, remove_session
+from app.services.session_store import set_session, SESSION_STORE
 
 HOSPITAL_DB = Path(__file__).resolve().parent.parent / "data" / "demo_hospital.db"
 
@@ -54,13 +54,13 @@ class TestRagIndexLifecycle:
     def test_session_not_indexed_before_build(self):
         sid = "rag-lifecycle-test-1"
         remove_schema_index(sid)  # ensure clean state
-        assert is_session_indexed(sid) is False
+        assert (sid in _SESSION_RAG_STORE) is False
 
     def test_session_indexed_after_build(self):
         sid = "rag-lifecycle-test-2"
         schema = _get_hospital_schema()
         build_schema_index(sid, schema)
-        assert is_session_indexed(sid) is True
+        assert (sid in _SESSION_RAG_STORE) is True
         remove_schema_index(sid)
 
     def test_session_not_indexed_after_remove(self):
@@ -68,7 +68,7 @@ class TestRagIndexLifecycle:
         schema = _get_hospital_schema()
         build_schema_index(sid, schema)
         remove_schema_index(sid)
-        assert is_session_indexed(sid) is False
+        assert (sid in _SESSION_RAG_STORE) is False
 
 
 # ---------------------------------------------------------------------------

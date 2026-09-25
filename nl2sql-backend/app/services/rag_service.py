@@ -226,6 +226,3 @@ def remove_schema_index(session_id: str) -> None:
     _SESSION_RAG_STORE.pop(session_id, None)
 
 
-def is_session_indexed(session_id: str) -> bool:
-    """Check if a session has an active RAG index."""
-    return session_id in _SESSION_RAG_STORE

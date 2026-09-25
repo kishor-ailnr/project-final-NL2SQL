@@ -6,7 +6,6 @@ sqlalchemy
 sqlglot
 sentence-transformers
 faiss-cpu
-requests
 python-multipart
 
 # Testing

@@ -14,13 +14,18 @@ _STRING_LITERAL_RE = re.compile(r"'(?:\\.|''|[^'\\])*'")
 _DOUBLE_QUOTE_RE = re.compile(r'"(?:\\.|""|[^"\\])*"')
 
 
+def _strip_strings(sql: str) -> str:
+    """Remove quoted string literals from SQL text so contents are not mistaken for comments."""
+    sql = _STRING_LITERAL_RE.sub("''", sql)
+    sql = _DOUBLE_QUOTE_RE.sub('""', sql)
+    return sql
+
+
 def _strip_comments_and_strings(sql: str) -> str:
     """Remove comments and quoted string literals from SQL text for structural analysis."""
     sql = _LINE_COMMENT_RE.sub(" ", sql)
     sql = _BLOCK_COMMENT_RE.sub(" ", sql)
-    sql = _STRING_LITERAL_RE.sub("''", sql)
-    sql = _DOUBLE_QUOTE_RE.sub('""', sql)
-    return sql
+    return _strip_strings(sql)
 
 
 def validate_sql(sql_string: str) -> Dict[str, Any]:
@@ -48,7 +53,7 @@ def validate_sql(sql_string: str) -> Dict[str, Any]:
         }
 
     # ------------------------------------------------------------------
-    # Guard 1: Comment-bypass & multi-statement check.
+    # Guard 1: Multi-statement check.
     # Strip comments and string literals first, then check whether the
     # remaining text contains more than one semicolon-delimited segment.
     # ------------------------------------------------------------------
@@ -62,13 +67,13 @@ def validate_sql(sql_string: str) -> Dict[str, Any]:
         }
 
     # ------------------------------------------------------------------
-    # Guard 2: Raw input contains any SQL comment marker.
-    # Reject inputs that contain -- or /* anywhere in the string.
-    # Legitimate Gemini-generated SELECT queries never need inline comments.
-    # This catches: "SELECT * FROM patients -- ; DROP TABLE patients"
+    # Guard 2: SQL comment syntax outside quoted string literals.
+    # Strip string literals first so legitimate values containing '--' or '/*'
+    # (e.g. WHERE code = '--') are not rejected as false positives.
+    # This catches injection attacks like: "SELECT * FROM patients -- ; DROP TABLE patients"
     # ------------------------------------------------------------------
-    stripped_input = sql_string.strip()
-    if "--" in stripped_input or "/*" in stripped_input:
+    without_strings = _strip_strings(sql_string)
+    if "--" in without_strings or "/*" in without_strings:
         return {
             "valid": False,
             "reason": "injection_detected",

@@ -182,3 +182,15 @@ class TestRateLimiting:
         _QUERY_TIMESTAMPS[sid] = [now - 65] * RATE_LIMIT_PER_MINUTE
         # This should NOT raise — the old timestamps are outside the window
         check_rate_limit(sid)
+
+    def test_expired_sessions_are_purged_from_timestamps_dict(self):
+        """UE-03: Sessions with timestamps older than the 60s window must be purged from dictionary keys."""
+        reset_rate_limits()
+        now = time.time()
+        # Create an abandoned session with timestamps 65 seconds ago
+        _QUERY_TIMESTAMPS["abandoned-session-old"] = [now - 65]
+        # Active request from a different session
+        check_rate_limit("active-session-new")
+        # 'abandoned-session-old' must have been purged from the dictionary keys
+        assert "abandoned-session-old" not in _QUERY_TIMESTAMPS
+        assert "active-session-new" in _QUERY_TIMESTAMPS

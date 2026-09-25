@@ -8,7 +8,6 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.models.meta_db import ConversationModel, QueryHistoryModel, get_db_session
-from app.services.session_store import get_session
 
 logger = logging.getLogger(__name__)
 

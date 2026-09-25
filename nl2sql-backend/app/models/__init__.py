@@ -4,7 +4,6 @@ from app.models.meta_db import (
     SessionModel,
     ConversationModel,
     QueryHistoryModel,
-    AuditLogModel,
     engine,
     init_db,
     get_db_session,
@@ -15,8 +14,8 @@ __all__ = [
     "SessionModel",
     "ConversationModel",
     "QueryHistoryModel",
-    "AuditLogModel",
     "engine",
     "init_db",
     "get_db_session",
 ]
+

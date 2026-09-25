@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 
 from app.services.execution_engine import run_select
-from app.services.session_store import set_session, remove_session
+from app.services.session_store import set_session, SESSION_STORE
 
 HOSPITAL_DB = Path(__file__).resolve().parent.parent / "data" / "demo_hospital.db"
 
@@ -23,7 +23,7 @@ def hospital_session(tmp_path):
     sid = "test-exec-engine-session"
     set_session(sid, {"db_path": str(HOSPITAL_DB)})
     yield sid
-    remove_session(sid)
+    SESSION_STORE.pop(sid, None)
 
 
 # ---------------------------------------------------------------------------
@@ -93,3 +93,10 @@ class TestRunSelectErrors:
         # The error message should not contain the full OS path to the DB file
         err = result.get("error", "")
         assert str(HOSPITAL_DB).replace("\\", "/") not in err
+
+    def test_error_message_preserves_error_details_not_masked_by_data_word(self, hospital_session):
+        # UE-01: An error referencing a table named 'data_patients' should retain the specific error, not get masked
+        result = run_select(hospital_session, "SELECT * FROM data_patients")
+        assert isinstance(result, dict)
+        err = result.get("error", "")
+        assert "no such table: data_patients" in err

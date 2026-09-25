@@ -91,7 +91,6 @@ else:
         "http://localhost:5173",
         "http://localhost:3000",
         "https://project-final-nl-2-sql.vercel.app",
-        "https://project-final-nl-2-sql.vercel.app/",
     ]
     cors_origin_regex = r"https://.*\.vercel\.app/?"
     cors_allow_credentials = True

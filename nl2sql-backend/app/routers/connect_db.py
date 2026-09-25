@@ -5,7 +5,7 @@ import sqlite3
 import uuid
 from typing import Optional
 from datetime import datetime
-from typing import List, Dict, Any, Literal
+from typing import List, Dict, Any
 from fastapi import APIRouter, HTTPException, Depends, UploadFile, File
 from pydantic import BaseModel, Field
 from sqlalchemy import create_engine, inspect
@@ -29,9 +29,6 @@ class ConnectDBRequest(BaseModel):
     )
     demo_name: Optional[str] = Field(
         "hospital", description="Name of the demo database ('hospital' or 'ecommerce')"
-    )
-    connection_string: Optional[str] = Field(
-        None, description="Optional connection string"
     )
 
 

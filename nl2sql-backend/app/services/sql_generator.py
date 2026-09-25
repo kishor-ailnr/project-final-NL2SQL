@@ -112,8 +112,8 @@ def _put_in_cache(cache_key: str, response_data: Dict[str, Any]) -> None:
     )
 
 
-def clear_query_cache(session_id: Optional[str] = None) -> None:
-    """Clear query cache for a specific session or globally."""
+def clear_query_cache() -> None:
+    """Clear query cache globally."""
     count = len(_QUERY_CACHE)
     _QUERY_CACHE.clear()
     logger.info("[Cache CLEAR] Cleared %d cached response entries.", count)

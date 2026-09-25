@@ -76,8 +76,16 @@ def check_rate_limit(session_id: str) -> None:
     now = time.time()
     cutoff = now - WINDOW_SECONDS
 
+    # Memory leak fix (UE-03): purge expired session keys entirely from _QUERY_TIMESTAMPS
+    expired_sessions = [
+        sid for sid, timestamps in _QUERY_TIMESTAMPS.items()
+        if sid != _GLOBAL_KEY and (not timestamps or timestamps[-1] <= cutoff)
+    ]
+    for sid in expired_sessions:
+        del _QUERY_TIMESTAMPS[sid]
+
     # --- Tier 1: Global limit ---
-    global_timestamps = [t for t in _QUERY_TIMESTAMPS[_GLOBAL_KEY] if t > cutoff]
+    global_timestamps = [t for t in _QUERY_TIMESTAMPS.get(_GLOBAL_KEY, []) if t > cutoff]
     if len(global_timestamps) >= GLOBAL_RATE_LIMIT_PER_MINUTE:
         retry_after = int(WINDOW_SECONDS - (now - global_timestamps[0])) + 1
         logger.warning(
@@ -92,7 +100,7 @@ def check_rate_limit(session_id: str) -> None:
         )
 
     # --- Tier 2: Per-session limit ---
-    session_timestamps = [t for t in _QUERY_TIMESTAMPS[session_id] if t > cutoff]
+    session_timestamps = [t for t in _QUERY_TIMESTAMPS.get(session_id, []) if t > cutoff]
     if len(session_timestamps) >= RATE_LIMIT_PER_MINUTE:
         retry_after = int(WINDOW_SECONDS - (now - session_timestamps[0])) + 1
         logger.warning(
@@ -113,6 +121,7 @@ def check_rate_limit(session_id: str) -> None:
 
     session_timestamps.append(now)
     _QUERY_TIMESTAMPS[session_id] = session_timestamps
+
 
 
 def reset_rate_limits() -> None:
@@ -147,37 +156,6 @@ class QueryResponse(BaseModel):
 
 
 
-class HistoryConversation(BaseModel):
-    id: str
-    nl_query: str
-    timestamp: str
-
-
-class HistoryResponse(BaseModel):
-    conversations: List[HistoryConversation]
-
-
-@router.get("/history", response_model=HistoryResponse)
-def get_history(
-    session_id: Optional[str] = None,
-    db: Session = Depends(get_db_session),
-):
-    """Retrieve query history from data/meta.db filtered by session_id, most recent first, limit to 20."""
-    query = db.query(QueryHistoryModel)
-    if session_id:
-        query = query.filter(QueryHistoryModel.session_id == session_id)
-
-    records = query.order_by(QueryHistoryModel.created_at.desc()).limit(20).all()
-
-    conversations = [
-        HistoryConversation(
-            id=str(record.id),
-            nl_query=record.nl_query,
-            timestamp=record.created_at.strftime("%Y-%m-%d %H:%M:%S") if record.created_at else "",
-        )
-        for record in records
-    ]
-    return HistoryResponse(conversations=conversations)
 
 
 @router.post("/query", response_model=QueryResponse)

@@ -149,3 +149,12 @@ class TestEdgeCases:
         SELECT name FROM aged
         """
         assert _valid(sql) is True
+
+    def test_select_with_double_dash_inside_string_literal(self):
+        # Double dash inside a string literal is a valid value, not a SQL comment injection (UE-05)
+        sql = "SELECT * FROM patients WHERE diagnosis = '-- not specified --'"
+        assert _valid(sql) is True
+
+    def test_select_with_block_comment_syntax_inside_string_literal(self):
+        sql = "SELECT * FROM patients WHERE diagnosis = '/* pending review */'"
+        assert _valid(sql) is True
