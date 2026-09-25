@@ -525,6 +525,18 @@ def build_pdf(output_path: str):
         ]
     ))
 
+    story.append(render_comp_card(
+        "frontend/src/components/lightswind/ai-loading-state.tsx",
+        "Lightswind UI AI loading state indicator component. Features 7 distinct animated loader variants (PulseBeam, GooeyPulse, "
+        "QuantumWave, CyberCore, GlowingRings, DotPulse, MatrixSpinner), shimmering status labels, live mono tabular elapsed timers, "
+        "and AI status badges, integrated into ChatWindow during question analysis and SQL generation.",
+        [
+            ("AiLoadingState props", "Supports label, sublabel, variant, size ('sm'|'md'|'lg'), theme ('glass'|'default'|'minimal'|'dark'), and showTimer."),
+            ("useElapsed(enabled)", "Custom React hook computing live tabular elapsed time in 100ms ticks with format ss.s or mm:ss."),
+            ("renderLoaderPattern()", "Renders selected Framer Motion loader variant with seamless continuous micro-animations."),
+        ]
+    ))
+
     # ---------------------------------------------------------
     # SECTION 2: FEATURE → CODE IMPLEMENTATION MAP
     # ---------------------------------------------------------
@@ -532,7 +544,7 @@ def build_pdf(output_path: str):
     story.append(HRFlowable(width="100%", thickness=1.5, color=c_teal, spaceBefore=4, spaceAfter=8))
     story.append(Paragraph("SECTION 2: Feature → Code Implementation Map & Failure Analysis", h1_style))
     story.append(Paragraph(
-        "This section maps all 8 frontend architectural features to their exact implementing components, followed by an explicit "
+        "This section maps all 9 frontend architectural features to their exact implementing components, followed by an explicit "
         "<b>Failure / Bypass Analysis</b> (answering the jury's question: <i>'What happens if component X fails or is bypassed?'</i>).",
         body_style
     ))
@@ -594,6 +606,13 @@ def build_pdf(output_path: str):
             "desc": "Option 2 on ConnectDBScreen allows users to drag-and-drop or browse .csv spreadsheets or .sql schema dumps, automatically sanitizing table names and generating schema prompts.",
             "impl": "frontend/src/components/ConnectDBScreen.jsx -> drag-and-drop dropzone<br/>frontend/src/components/ConnectDBScreen.jsx -> fileInputRef & handleUploadSubmit()<br/>frontend/src/api/client.js -> uploadDatabase()",
             "failure": "If a user attempts to upload an unsupported file type (e.g. .pdf or .exe), the frontend input accept filter and client validation immediately reject the file with a clear alert before any upload network bandwidth is consumed."
+        },
+        {
+            "id": "9",
+            "name": "Lightswind UI AI Loading State (Analyzing & Thinking)",
+            "desc": "Replaces static loading dots with Lightswind UI's animated AI Loading State indicator featuring monochromatic loader wavefronts (PulseBeam), live mono tabular elapsed timer, AI badge, and glassmorphic styling.",
+            "impl": "frontend/src/components/lightswind/ai-loading-state.tsx -> AiLoadingState<br/>frontend/src/components/ChatWindow.jsx -> isPending indicator",
+            "failure": "If animation execution is throttled, the timer hook continues calculating elapsed duration independently, and the container automatically unmounts upon query fulfillment, ensuring zero blocking or hung states."
         },
     ]
 

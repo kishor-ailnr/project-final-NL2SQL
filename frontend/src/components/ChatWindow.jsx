@@ -15,6 +15,7 @@ import {
   getConversationMessages,
   deleteConversation,
 } from '../api/client';
+import { AiLoadingState } from './lightswind/ai-loading-state';
 
 const INITIAL_WELCOME = {
   id: 'init-1',
@@ -528,23 +529,24 @@ export default function ChatWindow({ session, onDisconnect }) {
             );
           })}
 
-          {/* Animated Typing Indicator */}
+          {/* Lightswind UI AI Loading State Indicator */}
           {isPending && (
             <motion.div
-              initial={{ opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="flex w-full my-2.5 justify-start"
+              initial={{ opacity: 0, y: 8, scale: 0.98 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              transition={{ duration: 0.2 }}
+              className="flex w-full my-3 justify-start"
             >
-              <div className="bg-white/80 backdrop-blur-md text-slate-600 px-4 py-3 rounded-2xl rounded-bl-xs border border-slate-200/70 flex items-center gap-2.5 shadow-2xs">
-                <div className="flex items-center gap-1.5">
-                  <span className="w-2 h-2 rounded-full bg-teal-600 animate-bounce"></span>
-                  <span className="w-2 h-2 rounded-full bg-teal-500 animate-bounce [animation-delay:0.2s]"></span>
-                  <span className="w-2 h-2 rounded-full bg-teal-400 animate-bounce [animation-delay:0.4s]"></span>
-                </div>
-                <span className="text-xs font-medium text-slate-600 ml-1">
-                  Assistant analyzing & generating query...
-                </span>
-              </div>
+              <AiLoadingState
+                label="Analyzing & thinking..."
+                sublabel="Translating question & verifying SQL"
+                variant="PulseBeam"
+                theme="glass"
+                size="md"
+                showTimer={true}
+                showBadge={true}
+                className="bg-white/85 text-teal-900 border-teal-200/80 shadow-xs hover:border-teal-300"
+              />
             </motion.div>
           )}
 
