@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react';
 import ConnectDBScreen from './components/ConnectDBScreen';
 import ChatWindow from './components/ChatWindow';
-import GuideDialog from './components/GuideDialog';
+import HelpSidebar from './components/HelpSidebar';
 import { getSessionStatus } from './api/client';
+import logoImg from './assets/logo.png';
 
 export default function App() {
   const [screen, setScreen] = useState('connect'); // 'connect' | 'chat'
@@ -87,9 +88,11 @@ export default function App() {
           
           {/* Logo & App Brand */}
           <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-teal-600 to-teal-700 text-white flex items-center justify-center font-bold text-sm shadow-xs shadow-teal-700/20">
-              ⚡
-            </div>
+            <img
+              src={logoImg}
+              alt="NL2SQL Logo"
+              className="h-9 w-auto object-contain drop-shadow-2xs transition-transform duration-200 hover:scale-105"
+            />
             <div className="flex items-center gap-2">
               <span className="font-extrabold text-sm sm:text-base tracking-tight text-slate-900">
                 NL-to-SQL Assistant
@@ -109,19 +112,17 @@ export default function App() {
               </span>
             )}
 
-            {/* Persistent Lightswind UI Guide Dialog Trigger */}
-            <GuideDialog open={isHelpOpen} onOpenChange={setIsHelpOpen}>
-              <button
-                type="button"
-                className="p-1.5 sm:px-3 sm:py-1.5 rounded-xl bg-white hover:bg-teal-50/80 border border-slate-200/90 hover:border-teal-300 text-slate-700 hover:text-teal-800 transition-all text-xs font-semibold flex items-center gap-1.5 shadow-2xs group"
-                title="Open User Guide & Instructions"
-              >
-                <span className="w-5 h-5 rounded-full bg-slate-100 group-hover:bg-teal-600 text-slate-600 group-hover:text-white flex items-center justify-center font-bold text-xs transition-colors">
-                  ?
-                </span>
-                <span className="hidden sm:inline">Guide</span>
-              </button>
-            </GuideDialog>
+            {/* Persistent Help / Guide Button */}
+            <button
+              onClick={() => setIsHelpOpen(true)}
+              className="p-1.5 sm:px-3 sm:py-1.5 rounded-xl bg-white hover:bg-teal-50/80 border border-slate-200/90 hover:border-teal-300 text-slate-700 hover:text-teal-800 transition-all text-xs font-semibold flex items-center gap-1.5 shadow-2xs group"
+              title="Open User Guide & Help"
+            >
+              <span className="w-5 h-5 rounded-full bg-slate-100 group-hover:bg-teal-600 text-slate-600 group-hover:text-white flex items-center justify-center font-bold text-xs transition-colors">
+                ?
+              </span>
+              <span className="hidden sm:inline">Guide</span>
+            </button>
           </div>
 
         </div>
@@ -143,6 +144,12 @@ export default function App() {
           <ChatWindow session={session} onDisconnect={handleDisconnect} />
         )}
       </main>
+
+      {/* Global Help / Orientation Drawer (Left Slide-in) */}
+      <HelpSidebar
+        isOpen={isHelpOpen}
+        onClose={() => setIsHelpOpen(false)}
+      />
 
     </div>
   );

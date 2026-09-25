@@ -1,6 +1,7 @@
 import { useState, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { connectDB, uploadDB } from '../api/client';
+import logoImg from '../assets/logo.png';
 
 export default function ConnectDBScreen({ onConnected, initialNotice }) {
   const [dbType, setDbType] = useState('postgres');
@@ -98,11 +99,11 @@ export default function ConnectDBScreen({ onConnected, initialNotice }) {
       >
         {/* Header */}
         <div className="text-center">
-          <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-gradient-to-tr from-teal-500 to-teal-700 text-white mb-3 shadow-md shadow-teal-600/20">
-            <svg className="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4" />
-            </svg>
-          </div>
+          <img
+            src={logoImg}
+            alt="NL2SQL Logo"
+            className="w-20 h-20 sm:w-24 sm:h-24 mx-auto mb-3 object-contain drop-shadow-2xs transition-transform duration-300 hover:scale-105"
+          />
           <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-800 tracking-tight">
             NL-to-SQL Assistant
           </h1>

@@ -1,4 +1,5 @@
 import { motion } from 'framer-motion';
+import logoImg from '../assets/logo.png';
 
 export default function SQLPreviewPanel({ queryData = {}, onViewSQL }) {
   const {
@@ -53,9 +54,11 @@ export default function SQLPreviewPanel({ queryData = {}, onViewSQL }) {
       {/* Top Meta Bar */}
       <div className="flex flex-wrap items-center justify-between gap-2 mb-2.5 pb-2.5 border-b border-slate-100">
         <div className="flex items-center gap-2">
-          <div className="w-6 h-6 rounded-lg bg-teal-100/70 text-teal-700 flex items-center justify-center text-xs font-bold">
-            AI
-          </div>
+          <img
+            src={logoImg}
+            alt="NL2SQL"
+            className="w-5 h-5 object-contain shrink-0"
+          />
           <span className="text-xs font-semibold text-slate-700">
             Assistant Analysis
           </span>
