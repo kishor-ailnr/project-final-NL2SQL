@@ -164,12 +164,12 @@ export default function VoiceButton({
         onClick={handleClick}
         disabled={disabled}
         title={isRecording ? 'Click to stop listening' : 'Click to speak question'}
-        className={`relative w-11 h-11 min-w-[44px] min-h-[44px] rounded-xl sm:rounded-2xl border transition-all duration-200 shrink-0 flex items-center justify-center ${
+        className={`relative w-10 h-10 min-w-[40px] min-h-[40px] sm:w-11 sm:h-11 sm:min-w-[44px] sm:min-h-[44px] rounded-full border transition-all duration-200 shrink-0 flex items-center justify-center ${
           isRecording
             ? 'bg-rose-500 hover:bg-rose-600 text-white border-rose-400 ring-4 ring-rose-200 animate-pulse'
             : errorMessage
             ? 'bg-rose-50 border-rose-300 text-rose-600'
-            : 'bg-white hover:bg-teal-50/80 text-slate-600 hover:text-teal-700 border-slate-200/80 hover:border-teal-300 shadow-2xs'
+            : 'bg-white hover:bg-slate-50 text-slate-500 hover:text-teal-700 border-slate-200/90 hover:border-teal-300 shadow-2xs'
         } disabled:opacity-40 disabled:cursor-not-allowed`}
       >
         {isRecording ? (

@@ -414,12 +414,12 @@ def build_pdf(output_path: str):
     story.append(render_comp_card(
         "frontend/src/components/ChatWindow.jsx",
         "The primary ChatGPT-style conversational full-screen workspace. Features a compact responsive database toolbar, independent message list scrolling, "
-        "a fixed bottom composer with multiline auto-resizing textarea, 44px touch targets for mobile accessibility, SQL inspection drawer, and write confirmation modal.",
+        "a centered floating pill search bar without surrounding background layout that remains static while messages scroll, circular voice input button, SQL inspection drawer, and write confirmation modal.",
         [
             ("Full-viewport flex column", "Eliminates outer card margins, spanning 100% of viewport width and remaining vertical height."),
             ("Compact Database Toolbar", "Presents Chats, New Chat, Connected status, Session ID, table list pills, and Disconnect in a compact responsive row."),
             ("Independent Message Stream", "Scrolls conversation messages independently within a comfortable max-width reading column (max-w-4xl/5xl)."),
-            ("Fixed Bottom Composer", "Sticky composer with auto-resizing multiline textarea, Voice button (44px target), Send button (44px target), and Enter/Shift+Enter keyboard handling."),
+            ("Centered Static Search Bar", "Centered rounded-full pill search bar with zero surrounding background layout; stays static while messages scroll."),
             ("handleSend(e)", "Validates input, appends user message, submits to POST /api/query, and updates chat feed."),
             ("handleSelectConversation(id)", "Loads selected past conversation messages from backend and sets it as the active thread."),
             ("handleDeleteConversation(id)", "Deletes conversation via client API, removes from sidebar, and resets chat if active."),

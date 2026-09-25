@@ -565,13 +565,13 @@ export default function ChatWindow({ session, onDisconnect }) {
         </div>
       </div>
 
-      {/* Fixed / Sticky ChatGPT-style Bottom Composer */}
-      <div className="w-full shrink-0 border-t border-slate-200/80 bg-white/95 backdrop-blur-md px-3 sm:px-6 md:px-8 pt-2.5 pb-[max(0.75rem,env(safe-area-inset-bottom))] z-10 shadow-xs">
-        <div className="w-full max-w-4xl lg:max-w-5xl mx-auto">
-          <form onSubmit={handleSend} className="relative flex flex-col gap-1.5">
-            <div className="flex items-end gap-1.5 sm:gap-2 p-1.5 sm:p-2 bg-slate-50 hover:bg-white focus-within:bg-white border border-slate-200/90 focus-within:border-teal-500/80 focus-within:ring-3 focus-within:ring-teal-500/15 rounded-2xl sm:rounded-3xl transition-all shadow-2xs">
+      {/* Centered Static Bottom Search Bar (No surrounding background layout) */}
+      <div className="w-full shrink-0 z-20 flex justify-center px-4 pt-1 pb-[max(1rem,env(safe-area-inset-bottom))] bg-transparent">
+        <div className="w-full max-w-3xl lg:max-w-4xl">
+          <form onSubmit={handleSend} className="w-full">
+            <div className="flex items-center gap-2 p-1.5 sm:p-2 bg-white border border-slate-200/90 hover:border-slate-300 focus-within:border-teal-500/80 focus-within:ring-2 focus-within:ring-teal-500/20 rounded-full shadow-sm sm:shadow-md transition-all">
               
-              {/* Multiline expandable textarea */}
+              {/* Text Input / Multiline Textarea */}
               <textarea
                 ref={textareaRef}
                 rows={1}
@@ -580,11 +580,11 @@ export default function ChatWindow({ session, onDisconnect }) {
                 onKeyDown={handleKeyDown}
                 placeholder="Ask a question about your database in natural language..."
                 disabled={isPending}
-                className="flex-1 max-h-36 min-h-[40px] sm:min-h-[44px] px-3 py-2 text-sm text-slate-800 placeholder-slate-400 bg-transparent resize-none focus:outline-none disabled:opacity-60 leading-relaxed font-sans"
+                className="flex-1 max-h-32 min-h-[38px] px-3 sm:px-4 py-2 text-sm text-slate-800 placeholder-slate-400 bg-transparent resize-none focus:outline-none disabled:opacity-60 leading-normal font-sans"
               />
 
-              {/* Voice Button (min 44px touch target) */}
-              <div className="shrink-0 min-w-[44px] min-h-[44px] flex items-center justify-center">
+              {/* Voice Button */}
+              <div className="shrink-0 flex items-center justify-center">
                 <VoiceButton
                   onTranscript={handleVoiceComplete}
                   onRecordingComplete={handleVoiceComplete}
@@ -592,25 +592,19 @@ export default function ChatWindow({ session, onDisconnect }) {
                 />
               </div>
 
-              {/* Send Button (min 44px touch target) */}
+              {/* Send Button */}
               <button
                 type="submit"
                 disabled={!inputValue.trim() || isPending}
-                className="min-w-[44px] min-h-[44px] px-3.5 sm:px-4 rounded-xl sm:rounded-2xl bg-teal-600 hover:bg-teal-700 text-white font-semibold text-xs sm:text-sm shadow-sm shadow-teal-600/20 transition-all flex items-center justify-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed shrink-0 active:scale-95"
+                className="min-h-[40px] sm:min-h-[44px] px-4 sm:px-5 py-2 sm:py-2.5 rounded-full bg-teal-600 hover:bg-teal-700 text-white font-medium text-xs sm:text-sm shadow-sm transition-all flex items-center justify-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed shrink-0 active:scale-95"
                 title="Send message (Enter)"
               >
-                <span className="hidden sm:inline">Send</span>
+                <span>Send</span>
                 <svg className="w-4 h-4 rotate-90" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
                 </svg>
               </button>
 
-            </div>
-
-            {/* Helper Caption */}
-            <div className="flex items-center justify-between px-2 text-[10px] text-slate-400">
-              <span>Press <kbd className="px-1 py-0.5 bg-slate-100 rounded text-slate-500 font-mono">Enter ↵</kbd> to send, <kbd className="px-1 py-0.5 bg-slate-100 rounded text-slate-500 font-mono">Shift + Enter</kbd> for new line</span>
-              <span className="hidden sm:inline font-medium text-slate-400/80">NL-to-SQL Assistant Engine</span>
             </div>
           </form>
         </div>
