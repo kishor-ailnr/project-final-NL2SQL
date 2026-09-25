@@ -40,7 +40,7 @@ export async function connectDB({ db_type, connection_string, demo_name }) {
   }
 }
 
-export async function sendQuery({ session_id, text, language = 'en' }) {
+export async function sendQuery({ session_id, text, language = 'auto' }) {
   try {
     const response = await api.post('/api/query', {
       session_id,

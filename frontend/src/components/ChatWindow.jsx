@@ -30,9 +30,6 @@ export default function ChatWindow({ session, onDisconnect }) {
   const [activeSQLQuery, setActiveSQLQuery] = useState(null);
   const [isSQLDrawerOpen, setIsSQLDrawerOpen] = useState(false);
 
-  // Language state for voice and query ('en' or 'ta')
-  const [selectedLanguage, setSelectedLanguage] = useState('en');
-
   // Confirm Modal state for Write operations
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [pendingWriteQuery, setPendingWriteQuery] = useState(null);
@@ -73,7 +70,7 @@ export default function ChatWindow({ session, onDisconnect }) {
       const queryResponse = await sendQuery({
         session_id: sessionId,
         text,
-        language: selectedLanguage || 'en',
+        language: 'auto',
       });
 
       const assistantMessage = {
@@ -165,11 +162,8 @@ export default function ChatWindow({ session, onDisconnect }) {
     }
   };
 
-  const handleVoiceComplete = (transcript, lang) => {
+  const handleVoiceComplete = (transcript) => {
     if (!transcript) return;
-    if (lang) {
-      setSelectedLanguage(lang);
-    }
     setInputValue(transcript);
   };
 
@@ -366,10 +360,8 @@ export default function ChatWindow({ session, onDisconnect }) {
               className="flex-1 px-4 py-2.5 sm:py-3 rounded-2xl border border-slate-200/90 bg-white/90 text-slate-900 placeholder-slate-400 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 shadow-2xs transition-all disabled:opacity-60"
             />
 
-            {/* Voice Input Button & Language Toggle */}
+            {/* Voice Input Button */}
             <VoiceButton
-              language={selectedLanguage}
-              onLanguageChange={setSelectedLanguage}
               onTranscript={handleVoiceComplete}
               onRecordingComplete={handleVoiceComplete}
               disabled={isPending}

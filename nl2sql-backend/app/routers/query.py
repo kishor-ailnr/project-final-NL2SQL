@@ -55,7 +55,7 @@ def reset_rate_limits() -> None:
 class QueryRequest(BaseModel):
     session_id: str = Field(..., description="ID of the active database session")
     text: str = Field(..., description="Natural language user question")
-    language: str = Field("en", description="Language code, default 'en'")
+    language: str = Field("auto", description="Language code, default 'auto'")
 
 
 class QueryResponse(BaseModel):
