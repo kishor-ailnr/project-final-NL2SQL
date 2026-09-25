@@ -208,6 +208,23 @@ def connect_database(
     )
 
 
+@router.get("/session-status", response_model=ConnectDBResponse)
+def get_session_status(session_id: str):
+    """Verify if a session is currently active or restorable from database."""
+    from app.services.session_store import get_session
+    session = get_session(session_id)
+    if not session:
+        raise HTTPException(
+            status_code=404,
+            detail="Your previous session expired, please reconnect.",
+        )
+    return ConnectDBResponse(
+        session_id=session_id,
+        status="connected",
+        tables=session.get("tables", []),
+    )
+
+
 
 @router.post("/upload-db", response_model=ConnectDBResponse)
 async def upload_database(

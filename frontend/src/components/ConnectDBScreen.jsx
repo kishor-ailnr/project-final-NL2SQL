@@ -2,7 +2,7 @@ import { useState, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { connectDB, uploadDB } from '../api/client';
 
-export default function ConnectDBScreen({ onConnected }) {
+export default function ConnectDBScreen({ onConnected, initialNotice }) {
   const [dbType, setDbType] = useState('postgres');
   const [connectionString, setConnectionString] = useState('postgresql://user:password@localhost:5432/hospital_db');
   const [loadingAction, setLoadingAction] = useState(null); // 'hospital' | 'ecommerce' | 'custom' | 'upload' | null
@@ -110,6 +110,16 @@ export default function ConnectDBScreen({ onConnected }) {
             Explore with preloaded demo datasets, upload a custom file, or connect your database.
           </p>
         </div>
+
+        {/* Notice banner for expired sessions */}
+        {initialNotice && (
+          <div className="p-3.5 rounded-2xl bg-amber-50 border border-amber-200/90 text-amber-800 text-xs sm:text-sm flex items-center gap-2.5 shadow-2xs">
+            <svg className="w-5 h-5 shrink-0 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+            </svg>
+            <span className="font-medium">{initialNotice}</span>
+          </div>
+        )}
 
         {/* Error State Banner */}
         {error && (

@@ -146,3 +146,20 @@ def get_conversation_messages(
         )
 
     return ConversationMessagesResponse(messages=messages)
+
+
+@router.delete("/conversations/{conversation_id}")
+def delete_conversation(
+    conversation_id: str,
+    db: Session = Depends(get_db_session),
+):
+    """Delete a conversation and its associated query_history records (cascade delete)."""
+    conv = db.query(ConversationModel).filter(ConversationModel.id == conversation_id).first()
+    if conv:
+        # Cascade delete associated query history records
+        db.query(QueryHistoryModel).filter(QueryHistoryModel.conversation_id == conversation_id).delete()
+        db.delete(conv)
+        db.commit()
+        logger.info("Deleted conversation '%s' and its associated history rows", conversation_id)
+
+    return {"status": "deleted"}

@@ -13,6 +13,7 @@ import {
   createConversation,
   getConversations,
   getConversationMessages,
+  deleteConversation,
 } from '../api/client';
 
 const INITIAL_WELCOME = {
@@ -166,6 +167,31 @@ export default function ChatWindow({ session, onDisconnect }) {
       setMessages(formatted);
     } catch (err) {
       console.warn('Failed to load conversation messages:', err.message);
+    }
+  };
+
+  // Handler for deleting a conversation
+  const handleDeleteConversation = async (convId) => {
+    if (!convId) return;
+    try {
+      await deleteConversation(convId);
+      // Immediately remove from sidebar list
+      setConversations((prev) => prev.filter((c) => c.conversation_id !== convId));
+
+      // If the deleted conversation was the active one, reset to clean new-chat state
+      if (convId === activeConversationId) {
+        setActiveConversationId(null);
+        setMessages([
+          {
+            ...INITIAL_WELCOME,
+            id: `init-${Date.now()}`,
+            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          },
+        ]);
+        setInputValue('');
+      }
+    } catch (err) {
+      console.warn('Failed to delete conversation:', err.message);
     }
   };
 
@@ -335,6 +361,7 @@ export default function ChatWindow({ session, onDisconnect }) {
         onRefresh={() => fetchConversations(false)}
         onNewChat={handleNewChat}
         onSelectConversation={handleSelectConversation}
+        onDeleteConversation={handleDeleteConversation}
       />
 
       {/* SQL Drawer Component (Right Slide-in) */}

@@ -1,21 +1,74 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import ConnectDBScreen from './components/ConnectDBScreen';
 import ChatWindow from './components/ChatWindow';
 import HelpSidebar from './components/HelpSidebar';
+import { getSessionStatus } from './api/client';
 
 export default function App() {
   const [screen, setScreen] = useState('connect'); // 'connect' | 'chat'
   const [session, setSession] = useState(null);
   const [isHelpOpen, setIsHelpOpen] = useState(false);
+  const [sessionExpiredNotice, setSessionExpiredNotice] = useState('');
+  const [isRestoringSession, setIsRestoringSession] = useState(true);
+
+  // Check and restore persisted session from localStorage on mount
+  useEffect(() => {
+    const restoreSession = async () => {
+      try {
+        const storedStr = localStorage.getItem('nl2sql_session');
+        if (!storedStr) {
+          setIsRestoringSession(false);
+          return;
+        }
+
+        const storedData = JSON.parse(storedStr);
+        if (!storedData?.session_id) {
+          localStorage.removeItem('nl2sql_session');
+          setIsRestoringSession(false);
+          return;
+        }
+
+        // Verify with backend that session is active or restorable
+        const status = await getSessionStatus(storedData.session_id);
+        if (status?.status === 'connected') {
+          const mergedSession = {
+            ...storedData,
+            ...status,
+          };
+          setSession(mergedSession);
+          setScreen('chat');
+          setSessionExpiredNotice('');
+        }
+      } catch (err) {
+        console.warn('Session restoration failed:', err.message);
+        localStorage.removeItem('nl2sql_session');
+        setSession(null);
+        setScreen('connect');
+        setSessionExpiredNotice('Your previous session expired, please reconnect.');
+      } finally {
+        setIsRestoringSession(false);
+      }
+    };
+
+    restoreSession();
+  }, []);
 
   const handleConnected = (sessionData) => {
+    try {
+      localStorage.setItem('nl2sql_session', JSON.stringify(sessionData));
+    } catch (e) {
+      console.warn('Could not save session to localStorage:', e);
+    }
     setSession(sessionData);
     setScreen('chat');
+    setSessionExpiredNotice('');
   };
 
   const handleDisconnect = () => {
+    localStorage.removeItem('nl2sql_session');
     setSession(null);
     setScreen('connect');
+    setSessionExpiredNotice('');
   };
 
   return (
@@ -71,8 +124,16 @@ export default function App() {
 
       {/* Main Content Area */}
       <main className="flex-1 flex items-center justify-center py-4 sm:py-6">
-        {screen === 'connect' ? (
-          <ConnectDBScreen onConnected={handleConnected} />
+        {isRestoringSession ? (
+          <div className="flex flex-col items-center gap-3 text-slate-500">
+            <svg className="animate-spin w-6 h-6 text-teal-600" fill="none" viewBox="0 0 24 24">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+            <span className="text-xs font-medium">Restoring your workspace...</span>
+          </div>
+        ) : screen === 'connect' ? (
+          <ConnectDBScreen onConnected={handleConnected} initialNotice={sessionExpiredNotice} />
         ) : (
           <ChatWindow session={session} onDisconnect={handleDisconnect} />
         )}

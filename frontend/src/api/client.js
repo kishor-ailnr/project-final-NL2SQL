@@ -85,6 +85,26 @@ export async function getConversationMessages(conversation_id) {
   }
 }
 
+export async function deleteConversation(conversation_id) {
+  try {
+    const response = await api.delete(`/api/conversations/${conversation_id}`);
+    return response.data; // { status: "deleted" }
+  } catch (err) {
+    throw formatError(err, 'Failed to delete conversation.');
+  }
+}
+
+export async function getSessionStatus(session_id) {
+  try {
+    const response = await api.get('/api/session-status', {
+      params: { session_id },
+    });
+    return response.data; // { session_id, status, tables }
+  } catch (err) {
+    throw formatError(err, 'Your previous session expired, please reconnect.');
+  }
+}
+
 export async function confirmWrite({ session_id, query_id, confirmed }) {
   try {
     const response = await api.post('/api/confirm-write', {

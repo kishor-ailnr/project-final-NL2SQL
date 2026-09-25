@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 function formatRelativeTime(dateStr) {
@@ -33,11 +33,15 @@ export default function HistorySidebar({
   onRefresh,
   onNewChat,
   onSelectConversation,
+  onDeleteConversation,
 }) {
+  const [confirmDeleteId, setConfirmDeleteId] = useState(null);
+
   // Close on Escape key
   useEffect(() => {
     const handleKeyDown = (e) => {
       if (e.key === 'Escape' && isOpen) {
+        setConfirmDeleteId(null);
         onClose();
       }
     };
@@ -153,14 +157,18 @@ export default function HistorySidebar({
               ) : (
                 conversations.map((item) => {
                   const isActive = item.conversation_id === activeConversationId;
+                  const isConfirming = confirmDeleteId === item.conversation_id;
+
                   return (
-                    <button
+                    <div
                       key={item.conversation_id}
                       onClick={() => {
-                        if (onSelectConversation) onSelectConversation(item.conversation_id);
-                        if (onClose) onClose();
+                        if (!isConfirming) {
+                          if (onSelectConversation) onSelectConversation(item.conversation_id);
+                          if (onClose) onClose();
+                        }
                       }}
-                      className={`w-full text-left p-3 rounded-xl transition-all group shadow-2xs border ${
+                      className={`w-full text-left p-3 rounded-xl transition-all group shadow-2xs border cursor-pointer ${
                         isActive
                           ? 'bg-teal-50/90 border-teal-400/90 text-teal-950 shadow-xs ring-1 ring-teal-400/30'
                           : 'bg-white/70 hover:bg-teal-50/40 border-slate-200/70 hover:border-teal-200/80 text-slate-800'
@@ -172,14 +180,63 @@ export default function HistorySidebar({
                         }`}>
                           {item.title || 'New Chat'}
                         </p>
-                        {isActive && (
-                          <span className="w-2 h-2 rounded-full bg-teal-600 shrink-0" title="Active conversation" />
+
+                        {/* Inline delete confirmation or trash icon */}
+                        {isConfirming ? (
+                          <div
+                            className="flex items-center gap-1 shrink-0 bg-white/95 px-1.5 py-0.5 rounded-lg border border-rose-200 shadow-2xs"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <span className="text-[10px] text-rose-700 font-semibold">Delete?</span>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setConfirmDeleteId(null);
+                                if (onDeleteConversation) onDeleteConversation(item.conversation_id);
+                              }}
+                              className="px-1.5 py-0.5 rounded bg-rose-600 hover:bg-rose-700 text-white text-[10px] font-bold transition-colors"
+                              title="Confirm delete"
+                            >
+                              Yes
+                            </button>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setConfirmDeleteId(null);
+                              }}
+                              className="px-1.5 py-0.5 rounded bg-slate-200 hover:bg-slate-300 text-slate-700 text-[10px] transition-colors"
+                              title="Cancel delete"
+                            >
+                              No
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            {isActive && (
+                              <span className="w-2 h-2 rounded-full bg-teal-600 shrink-0" title="Active conversation" />
+                            )}
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setConfirmDeleteId(item.conversation_id);
+                              }}
+                              className="opacity-0 group-hover:opacity-100 p-1 rounded-md text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-all"
+                              title="Delete this chat"
+                            >
+                              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                              </svg>
+                            </button>
+                          </div>
                         )}
                       </div>
                       <span className="text-[10px] text-slate-400 mt-1 block">
                         {formatRelativeTime(item.created_at)}
                       </span>
-                    </button>
+                    </div>
                   );
                 })
               )}
