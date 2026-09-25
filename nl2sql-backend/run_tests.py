@@ -10,16 +10,24 @@ Automatically inspects GEMINI_API_KEY:
 
 import os
 import sys
-import pytest
+import subprocess
 
 def main():
     gemini_key = os.getenv("GEMINI_API_KEY", "").strip()
 
     args = [
+        sys.executable,
+        "-m",
+        "pytest",
         "-v",
-        "--cov=app",
-        "--cov-report=term-missing",
     ]
+
+    # Check if pytest-cov is available
+    try:
+        import pytest_cov
+        args.extend(["--cov=app", "--cov-report=term-missing"])
+    except ImportError:
+        print("Notice: pytest-cov not installed, proceeding without coverage flag.")
 
     if not gemini_key:
         print("\n" + "=" * 70)
@@ -33,9 +41,9 @@ def main():
         print("  Running complete test suite (unit + integration)...")
         print("=" * 70 + "\n")
 
-    print(f"Executing: pytest {' '.join(args)}\n")
-    exit_code = pytest.main(args)
-    sys.exit(exit_code)
+    print(f"Executing: {' '.join(args)}\n")
+    proc = subprocess.run(args)
+    sys.exit(proc.returncode)
 
 if __name__ == "__main__":
     main()
