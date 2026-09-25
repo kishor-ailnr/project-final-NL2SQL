@@ -260,8 +260,8 @@ Instructions:
      - Set "unavailable_message": null
 
 5. Corrected Terms Tracking:
-   - If you corrected any misspelled or phonetically misheard words between the user's input and "interpreted_text", provide them in "corrected_terms" as a list of {"original": "misheard_word", "corrected": "fixed_word"}.
-   - Example: [{"original": "pashents", "corrected": "patients"}, {"original": "fourty", "corrected": "forty"}]
+   - If you corrected any misspelled or phonetically misheard words between the user's input and "interpreted_text", provide them in "corrected_terms" as a list of {{"original": "misheard_word", "corrected": "fixed_word"}}.
+   - Example: [{{"original": "pashents", "corrected": "patients"}}, {{"original": "fourty", "corrected": "forty"}}]
    - If no words were corrected, return [].
 
 6. Output Structure Rules based on "needs_clarification" and "data_available":
@@ -360,7 +360,7 @@ Database Schema:
 Instructions:
 1. Determine if the requested data exists in the schema. If absent, set "data_available": false, provide "unavailable_message", set sql to null.
 2. Determine if the question needs clarification (e.g. ranking word without metric and limit, or vague terms like 'important' without criteria).
-3. Fix speech-to-text mistakes in interpreted_text and list {"original", "corrected"} pairs in corrected_terms.
+3. Fix speech-to-text mistakes in interpreted_text and list {{"original", "corrected"}} pairs in corrected_terms.
 4. If needs_clarification is true, set sql to null, explanation to null, confidence < 0.5, and provide a short clarification_question.
 5. If valid and available, generate valid SQLite in sql, explanation, confidence >= 0.5.
 
