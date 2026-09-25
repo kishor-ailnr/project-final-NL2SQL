@@ -68,6 +68,7 @@ class QueryResponse(BaseModel):
     query_type: str = "select"
     result: List[Any] = []
     chart_type: str = "none"
+    interpreted_text: Optional[str] = None
 
 
 class HistoryConversation(BaseModel):
@@ -143,6 +144,8 @@ def handle_query(
             detail="Failed to generate SQL query for this question. Please try rephrasing your question.",
         )
 
+    interpreted_text = gen_data.get("interpreted_text") or payload.text
+
     # Handle clarification needed before validation or execution
     if gen_data.get("needs_clarification", False):
         clarification_q = gen_data.get("clarification_question") or "Could you please clarify your request?"
@@ -170,6 +173,7 @@ def handle_query(
             query_type="select",
             result=[],
             chart_type="none",
+            interpreted_text=interpreted_text,
         )
 
     sql = gen_data.get("sql", "")
@@ -202,6 +206,7 @@ def handle_query(
             query_type="select",
             result=[],
             chart_type="none",
+            interpreted_text=interpreted_text,
         )
 
     # 3. Execute SQL
@@ -230,6 +235,7 @@ def handle_query(
             query_type="select",
             result=[],
             chart_type="none",
+            interpreted_text=interpreted_text,
         )
 
     # 4. Save successful query to query_history in meta_db
@@ -255,4 +261,5 @@ def handle_query(
         query_type="select",
         result=exec_result,
         chart_type="none",
+        interpreted_text=interpreted_text,
     )

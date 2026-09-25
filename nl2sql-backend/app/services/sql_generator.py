@@ -120,7 +120,14 @@ Given the following SQLite database schema:
 User Question: "{nl_question}"
 
 Instructions:
-1. Language & Dialect Understanding (English, Tamil, and Thanglish):
+1. Speech-to-Text Correction & Interpreted Text:
+   - The user's input may come from speech recognition, which occasionally mishears words (for example: unusual word combinations, typos, or phonetically similar words like "shom me pashents older then fourty").
+   - Always return an "interpreted_text" field in the JSON response:
+     - If the input text looks like it could contain speech-recognition errors or typos, infer the most likely intended sentence and put that corrected version in "interpreted_text", in the same language/script as the input (for example: "shom me pashents older then fourty" -> "show me patients older than forty").
+     - If the input already looks clean and normal (e.g. clearly typed text), "interpreted_text" should just be the same as the input.
+   - Base your SQL generation and query interpretation on this corrected "interpreted_text".
+
+2. Language & Dialect Understanding (English, Tamil, and Thanglish):
    - The user's question may be written in:
      a) English (e.g. "list all patients older than 40")
      b) Tamil in Tamil script (e.g. "40 வயதுக்கு மேற்பட்ட அனைத்து நோயாளிகளையும் பட்டியலிடுங்கள்")
@@ -135,32 +142,35 @@ Instructions:
      - If the user asked in Tamil script, you may provide the explanation in Tamil script or clean English.
      - If the user asked in English, provide the explanation in English.
 
-2. Clarification & Ambiguity Assessment:
-   Before generating SQL, decide whether the user's question requires clarification. Set "needs_clarification" to true when:
+3. Clarification & Ambiguity Assessment:
+   Before generating SQL, decide whether the interpreted question requires clarification. Set "needs_clarification" to true when:
    - A ranking word is used ("top", "best", "highest", "most", "lowest", "yaaru top", etc.) without specifying BOTH a metric to rank by AND a number/limit (for example: "give me the top patients" or "top patients yaaru" is ambiguous, whereas "top 5 patients by number of appointments" specifies both metric and limit and is NOT ambiguous).
    - A vague qualitative term is used with no defined criteria ("important", "recent", "significant", "good", "bad", "mukkiyamaana") without a clear threshold or timeframe (for example: "show me important doctors" or "முக்கியமான மருத்துவர்களைக் காட்டு" is ambiguous).
    - The question could reasonably map to more than one table or column and the correct one cannot be inferred from the schema or sample values.
    Otherwise, if the question has clear criteria or explicit filtering (for example: "list all patients older than 40" or "40 vayasuku mela irukra patients ellam kaatu"), set "needs_clarification" to false.
 
-3. Structure Rules based on "needs_clarification":
+4. Structure Rules based on "needs_clarification":
    - If "needs_clarification" is true:
      - "needs_clarification": true
      - "clarification_question": a short, specific, polite question asking the user to clarify the ambiguity (in clean English or Tamil script, never Thanglish).
+     - "interpreted_text": the corrected/cleaned version of the input question.
      - "sql": null
      - "explanation": null
      - "confidence": a float below 0.5 (e.g. 0.2 or 0.3)
    - If "needs_clarification" is false:
      - "needs_clarification": false
      - "clarification_question": null
-     - "sql": a valid, executable SQLite query that accurately answers the question. If filtering on text/categorical columns (such as '1st year', '2nd year'), match the exact text format shown in the sample values. For top N queries, include appropriate ORDER BY and LIMIT.
+     - "interpreted_text": the corrected/cleaned version of the input question.
+     - "sql": a valid, executable SQLite query that accurately answers the question based on the interpreted text. If filtering on text/categorical columns (such as '1st year', '2nd year'), match the exact text format shown in the sample values. For top N queries, include appropriate ORDER BY and LIMIT.
      - "explanation": a concise explanation of how the query answers the question (in clean English or Tamil script).
      - "confidence": a float between 0.7 and 1.0.
 
-4. CRITICAL: Return ONLY a single valid JSON object. Do not include markdown code fences (```json or ```), backticks, or any introductory or concluding text.
+5. CRITICAL: Return ONLY a single valid JSON object. Do not include markdown code fences (```json or ```), backticks, or any introductory or concluding text.
 Format:
 {{
   "needs_clarification": false,
   "clarification_question": null,
+  "interpreted_text": "the corrected/cleaned version of the input",
   "sql": "SELECT ...",
   "explanation": "Brief explanation...",
   "confidence": 0.95
@@ -187,7 +197,7 @@ Format:
 
             try:
                 data = json.loads(cleaned)
-                _validate_result(data)
+                _validate_result(data, nl_question)
                 _WORKING_MODEL = model_name
                 _QUERY_CACHE[cache_key] = data
                 return data
@@ -206,12 +216,14 @@ User Question: "{nl_question}"
 
 Instructions:
 1. Determine if the question needs clarification (e.g. ranking word without metric and limit, or vague terms like 'important' without criteria).
-2. If needs_clarification is true, set sql to null, explanation to null, confidence < 0.5, and provide a short clarification_question.
-3. If needs_clarification is false, generate valid SQLite in sql, explanation, confidence >= 0.5, and clarification_question to null.
-4. Output ONLY raw valid JSON without markdown formatting or backticks:
+2. Fix speech-to-text mistakes in interpreted_text.
+3. If needs_clarification is true, set sql to null, explanation to null, confidence < 0.5, and provide a short clarification_question.
+4. If needs_clarification is false, generate valid SQLite in sql, explanation, confidence >= 0.5, and clarification_question to null.
+5. Output ONLY raw valid JSON without markdown formatting or backticks:
 {{
   "needs_clarification": true or false,
   "clarification_question": "..." or null,
+  "interpreted_text": "corrected sentence",
   "sql": "..." or null,
   "explanation": "..." or null,
   "confidence": 0.3 or 0.9
@@ -220,7 +232,7 @@ Instructions:
                 retry_res = model.generate_content(retry_prompt, generation_config=gen_config)
                 retry_cleaned = _clean_json_string(retry_res.text or "")
                 retry_data = json.loads(retry_cleaned)
-                _validate_result(retry_data)
+                _validate_result(retry_data, nl_question)
                 _WORKING_MODEL = model_name
                 _QUERY_CACHE[cache_key] = retry_data
                 return retry_data
@@ -241,10 +253,17 @@ Instructions:
 
 
 
-def _validate_result(data: Any) -> None:
+def _validate_result(data: Any, nl_question: str = "") -> None:
     """Ensure result dictionary contains required fields with expected types."""
     if not isinstance(data, dict):
         raise ValueError("Expected JSON object")
+
+    # Normalize interpreted_text
+    interpreted = data.get("interpreted_text")
+    if not interpreted or not isinstance(interpreted, str) or not interpreted.strip():
+        data["interpreted_text"] = nl_question
+    else:
+        data["interpreted_text"] = interpreted.strip()
 
     # Normalize needs_clarification
     needs_clarif = bool(data.get("needs_clarification", False))

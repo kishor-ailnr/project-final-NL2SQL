@@ -55,10 +55,13 @@ export default function ChatWindow({ session, onDisconnect }) {
     if (!text || isPending) return;
 
     const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const userMsgId = `user-${Date.now()}`;
     const userMessage = {
-      id: `user-${Date.now()}`,
+      id: userMsgId,
       role: 'user',
       content: text,
+      raw_content: text,
+      interpreted_text: null,
       timestamp: timeStr,
     };
 
@@ -72,6 +75,17 @@ export default function ChatWindow({ session, onDisconnect }) {
         text,
         language: 'auto',
       });
+
+      // Update matching user message with interpreted_text if returned
+      if (queryResponse?.interpreted_text) {
+        setMessages((prev) =>
+          prev.map((msg) =>
+            msg.id === userMsgId
+              ? { ...msg, interpreted_text: queryResponse.interpreted_text }
+              : msg
+          )
+        );
+      }
 
       const assistantMessage = {
         id: `asst-${Date.now()}`,
@@ -271,6 +285,8 @@ export default function ChatWindow({ session, onDisconnect }) {
                   key={msg.id}
                   role="user"
                   content={msg.content}
+                  rawContent={msg.raw_content || msg.content}
+                  interpretedText={msg.interpreted_text}
                   timestamp={msg.timestamp}
                 />
               );
