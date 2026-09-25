@@ -41,6 +41,13 @@ class ConnectDBResponse(BaseModel):
     tables: List[str]
 
 
+class SessionStatusResponse(BaseModel):
+    valid: bool
+    status: Optional[str] = "connected"
+    session_id: Optional[str] = None
+    tables: Optional[List[str]] = []
+
+
 def sanitize_table_name(filename: str) -> str:
     """Sanitize filename to a valid, clean SQLite table name.
 
@@ -208,19 +215,22 @@ def connect_database(
     )
 
 
-@router.get("/session-status", response_model=ConnectDBResponse)
+@router.get("/session-status", response_model=SessionStatusResponse)
 def get_session_status(session_id: str):
     """Verify if a session is currently active or restorable from database."""
     from app.services.session_store import get_session
     session = get_session(session_id)
     if not session:
-        raise HTTPException(
-            status_code=404,
-            detail="Your previous session expired, please reconnect.",
+        return SessionStatusResponse(
+            valid=False,
+            status="expired",
+            session_id=session_id,
+            tables=[],
         )
-    return ConnectDBResponse(
-        session_id=session_id,
+    return SessionStatusResponse(
+        valid=True,
         status="connected",
+        session_id=session_id,
         tables=session.get("tables", []),
     )
 

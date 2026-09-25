@@ -99,7 +99,7 @@ export async function getSessionStatus(session_id) {
     const response = await api.get('/api/session-status', {
       params: { session_id },
     });
-    return response.data; // { session_id, status, tables }
+    return response.data; // { valid, status, session_id, tables }
   } catch (err) {
     throw formatError(err, 'Your previous session expired, please reconnect.');
   }

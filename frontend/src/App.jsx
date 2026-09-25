@@ -30,14 +30,17 @@ export default function App() {
 
         // Verify with backend that session is active or restorable
         const status = await getSessionStatus(storedData.session_id);
-        if (status?.status === 'connected') {
+        if (status?.valid === true || status?.status === 'connected') {
           const mergedSession = {
             ...storedData,
             ...status,
+            status: 'connected',
           };
           setSession(mergedSession);
           setScreen('chat');
           setSessionExpiredNotice('');
+        } else {
+          throw new Error('Your previous session expired, please reconnect.');
         }
       } catch (err) {
         console.warn('Session restoration failed:', err.message);
