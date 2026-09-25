@@ -42,9 +42,9 @@ class MessageDetail(BaseModel):
     chart_type: str = "none"
     timestamp: str
     query_type: Optional[str] = "select"
-    data_available: bool = True
+    data_available: Optional[bool] = True
     unavailable_message: Optional[str] = None
-    corrected_terms: List[Dict[str, str]] = []
+    corrected_terms: Optional[List[Dict[str, Any]]] = []
 
 
 class ConversationMessagesResponse(BaseModel):

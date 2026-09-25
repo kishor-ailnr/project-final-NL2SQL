@@ -236,30 +236,50 @@ def get_session_status(session_id: str):
 
 
 
+# Maximum allowed upload size: 5 MB
+_MAX_UPLOAD_BYTES = 5 * 1024 * 1024  # 5 MB
+
+
 @router.post("/upload-db", response_model=ConnectDBResponse)
 async def upload_database(
     file: UploadFile = File(...),
     db: Session = Depends(get_db_session),
 ):
-    """Upload a .csv or .sql file, import into a new session SQLite database, and return session."""
+    """Upload a .csv or .sql file, import into a new session SQLite database, and return session.
+
+    Security guards (applied before any disk I/O):
+    - File extension must be .csv or .sql (MIME type is not trusted; we check the name).
+    - File size must not exceed 5 MB to prevent disk exhaustion.
+    - File must not be empty.
+    """
     filename = file.filename or "uploaded_data"
     lower_name = filename.lower()
+
+    # Guard 1: Extension check — fail fast before reading any bytes
     if not (lower_name.endswith(".csv") or lower_name.endswith(".sql")):
         raise HTTPException(
             status_code=400,
             detail="Unsupported file format. Please upload a .csv or .sql file.",
         )
 
-    session_id = str(uuid.uuid4())
-    db_filename = f"upload_{session_id}.db"
-    db_path = DATA_DIR / db_filename
-
+    # Guard 2: Read content, then enforce size and non-empty checks
     content_bytes = await file.read()
+
+    if len(content_bytes) > _MAX_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"File too large. Maximum allowed upload size is 5 MB.",
+        )
+
     if not content_bytes or len(content_bytes.strip()) == 0:
         raise HTTPException(
             status_code=400,
             detail="The uploaded file is empty.",
         )
+
+    session_id = str(uuid.uuid4())
+    db_filename = f"upload_{session_id}.db"
+    db_path = DATA_DIR / db_filename
 
     try:
         sqlite_conn = sqlite3.connect(str(db_path))

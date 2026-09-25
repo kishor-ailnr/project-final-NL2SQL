@@ -5,6 +5,9 @@ nl2sql-backend/.env
 nl2sql-backend/data/*.db-shm
 nl2sql-backend/data/*.db-wal
 nl2sql-backend/meta.db*
+nl2sql-backend/.pytest_cache/
+nl2sql-backend/.coverage
+nl2sql-backend/scratch/
 frontend/node_modules/
 frontend/dist/
 frontend/.env

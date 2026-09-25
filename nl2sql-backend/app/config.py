@@ -29,3 +29,8 @@ if not GEMINI_API_KEY or not GEMINI_API_KEY.strip():
 DATABASE_URL = f"sqlite:///{META_DB_PATH.as_posix()}"
 DEMO_HOSPITAL_DB_PATH = DATA_DIR / "demo_hospital.db"
 DEMO_ECOMMERCE_DB_PATH = DATA_DIR / "demo_ecommerce.db"
+
+# Environment: set APP_ENV=production in production deployments.
+# Defaults to "development" so local dev stays permissive automatically.
+APP_ENV: str = os.getenv("APP_ENV", "development").lower().strip()
+IS_PRODUCTION: bool = APP_ENV == "production"

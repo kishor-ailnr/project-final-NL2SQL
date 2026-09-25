@@ -42,7 +42,7 @@ def get_embedding_model():
 
 def build_table_summary(
     table_name: str,
-    columns: List[Dict[str, Any]],
+    columns: Any,
     sample_values_map: Optional[Dict[str, Any]] = None,
 ) -> str:
     """Build a rich, semantically meaningful text representation of a table.
@@ -51,13 +51,19 @@ def build_table_summary(
     to enable accurate semantic retrieval matching user queries.
     """
     col_descs = []
-    for c in columns:
-        col_name = c.get("name", "")
-        col_type = c.get("type", "")
-        samples = c.get("sample_values")
-        if not samples and sample_values_map:
-            samples = sample_values_map.get(col_name)
-        samples = samples or []
+    columns_list = columns if isinstance(columns, (list, tuple)) else []
+    for c in columns_list:
+        if isinstance(c, dict):
+            col_name = c.get("name", "")
+            col_type = c.get("type", "")
+            samples = c.get("sample_values")
+            if not samples and sample_values_map:
+                samples = sample_values_map.get(col_name)
+            samples = samples or []
+        else:
+            col_name = str(c)
+            col_type = ""
+            samples = []
 
         # Take up to 3 distinct non-empty sample values
         sample_strs = [str(s) for s in samples[:3] if s is not None and str(s).strip()]
@@ -80,12 +86,24 @@ def build_table_summary(
 
 def build_schema_index(
     session_id: str,
-    tables: List[str],
-    schema: Dict[str, List[Dict[str, Any]]],
+    tables: Any,
+    schema: Optional[Dict[str, Any]] = None,
     sample_values: Optional[Dict[str, Dict[str, List[Any]]]] = None,
 ) -> None:
-    """Generate embeddings for table summaries and store them in a FAISS IndexFlatIP index."""
-    if not tables:
+    """Generate embeddings for table summaries and store them in a FAISS IndexFlatIP index.
+
+    Supports both signatures:
+      build_schema_index(session_id, tables, schema, sample_values)
+      build_schema_index(session_id, schema)  # where schema is Dict[str, list]
+    """
+    if schema is None and isinstance(tables, dict):
+        schema = tables
+        table_list_input = list(schema.keys())
+    else:
+        table_list_input = list(tables) if tables else []
+        schema = schema or {}
+
+    if not table_list_input:
         logger.warning("No tables provided to build_schema_index for session '%s'", session_id)
         return
 
@@ -96,7 +114,7 @@ def build_schema_index(
         summaries: List[str] = []
         table_list: List[str] = []
 
-        for tbl in tables:
+        for tbl in table_list_input:
             cols = schema.get(tbl, [])
             tbl_samples = (sample_values or {}).get(tbl, {})
             summary = build_table_summary(tbl, cols, tbl_samples)

@@ -20,10 +20,24 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-# In-memory sliding window rate limiter: session_id -> list of float timestamps
+# ---------------------------------------------------------------------------
+# Rate Limiting — two-tier sliding window (in-memory)
+# ---------------------------------------------------------------------------
+# Tier 1 (per-session):  20 requests / minute per session_id
+#   — prevents a single user from hammering Gemini via one session.
+# Tier 2 (global):      100 requests / minute across ALL sessions combined
+#   — prevents a client from creating many session IDs to bypass Tier 1
+#     and exhausting the free Gemini quota.
+# ---------------------------------------------------------------------------
+# In-memory store: session_id -> list[float timestamps]
 _QUERY_TIMESTAMPS: Dict[str, List[float]] = defaultdict(list)
-RATE_LIMIT_PER_MINUTE = 20
+
+RATE_LIMIT_PER_MINUTE = 20          # per session
+GLOBAL_RATE_LIMIT_PER_MINUTE = 100  # across all sessions
 WINDOW_SECONDS = 60.0
+
+# Global sentinel key — never a valid UUID session_id
+_GLOBAL_KEY = "__global__"
 
 
 def generate_conversation_title(question: str) -> str:
@@ -50,17 +64,41 @@ def generate_conversation_title(question: str) -> str:
 
 
 def check_rate_limit(session_id: str) -> None:
-    """Enforce in-memory rate limiting of 20 queries per minute per session_id."""
+    """Enforce two-tier in-memory rate limiting on /api/query.
+
+    Tier 1 — Global:      100 requests / minute across ALL session IDs combined.
+    Tier 2 — Per-session: 20 requests  / minute per individual session_id.
+
+    Both tiers use a sliding 60-second window. The global check runs first so
+    that a client creating many session IDs to bypass per-session limits is
+    caught before the per-session bucket is even updated.
+    """
     now = time.time()
     cutoff = now - WINDOW_SECONDS
-    timestamps = [t for t in _QUERY_TIMESTAMPS[session_id] if t > cutoff]
 
-    if len(timestamps) >= RATE_LIMIT_PER_MINUTE:
-        retry_after = int(WINDOW_SECONDS - (now - timestamps[0])) + 1
+    # --- Tier 1: Global limit ---
+    global_timestamps = [t for t in _QUERY_TIMESTAMPS[_GLOBAL_KEY] if t > cutoff]
+    if len(global_timestamps) >= GLOBAL_RATE_LIMIT_PER_MINUTE:
+        retry_after = int(WINDOW_SECONDS - (now - global_timestamps[0])) + 1
         logger.warning(
-            "Rate limit exceeded for session_id '%s' (%d requests in 60s). Retry after %ds",
+            "Global rate limit exceeded (%d requests in 60s from all sessions). Retry after %ds",
+            len(global_timestamps),
+            retry_after,
+        )
+        raise HTTPException(
+            status_code=429,
+            detail="Server is under heavy load. Please wait a moment before trying again.",
+            headers={"Retry-After": str(max(1, retry_after))},
+        )
+
+    # --- Tier 2: Per-session limit ---
+    session_timestamps = [t for t in _QUERY_TIMESTAMPS[session_id] if t > cutoff]
+    if len(session_timestamps) >= RATE_LIMIT_PER_MINUTE:
+        retry_after = int(WINDOW_SECONDS - (now - session_timestamps[0])) + 1
+        logger.warning(
+            "Per-session rate limit exceeded for session_id '%s' (%d requests in 60s). Retry after %ds",
             session_id,
-            len(timestamps),
+            len(session_timestamps),
             retry_after,
         )
         raise HTTPException(
@@ -69,8 +107,12 @@ def check_rate_limit(session_id: str) -> None:
             headers={"Retry-After": str(max(1, retry_after))},
         )
 
-    timestamps.append(now)
-    _QUERY_TIMESTAMPS[session_id] = timestamps
+    # Record this request in both buckets
+    global_timestamps.append(now)
+    _QUERY_TIMESTAMPS[_GLOBAL_KEY] = global_timestamps
+
+    session_timestamps.append(now)
+    _QUERY_TIMESTAMPS[session_id] = session_timestamps
 
 
 def reset_rate_limits() -> None:
@@ -89,7 +131,7 @@ class QueryResponse(BaseModel):
     query_id: Union[str, int]
     sql: Optional[str] = None
     explanation: Optional[str] = None
-    confidence: float
+    confidence: float = 1.0
     needs_clarification: bool = False
     clarification_question: Optional[str] = None
     query_type: str = "select"
@@ -99,9 +141,9 @@ class QueryResponse(BaseModel):
     detected_language: Optional[str] = None
     self_corrected: bool = False
     correction_attempts: int = 0
-    data_available: bool = True
+    data_available: Optional[bool] = True
     unavailable_message: Optional[str] = None
-    corrected_terms: List[Dict[str, str]] = []
+    corrected_terms: Optional[List[Dict[str, Any]]] = []
 
 
 
@@ -206,10 +248,23 @@ def handle_query(
                 status_code=429,
                 detail="AI service rate limit or quota exceeded. Please wait a moment and try again.",
             )
-        raise HTTPException(
-            status_code=500,
-            detail="Failed to generate SQL query for this question. Please try rephrasing your question.",
+        logger.warning(
+            "Fallback clarification triggered after SQL generation error for session '%s': %s",
+            payload.session_id,
+            exc,
         )
+        gen_data = {
+            "data_available": True,
+            "unavailable_message": None,
+            "corrected_terms": [],
+            "needs_clarification": True,
+            "clarification_question": "I could not generate a SQL query for this question. Could you please clarify your request with more specific criteria or table names?",
+            "interpreted_text": payload.text,
+            "sql": None,
+            "explanation": None,
+            "confidence": 0.2,
+            "detected_language": "english",
+        }
 
     interpreted_text = gen_data.get("interpreted_text") or payload.text
     detected_lang = gen_data.get("detected_language")

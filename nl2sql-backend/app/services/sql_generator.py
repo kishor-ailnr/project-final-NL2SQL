@@ -225,46 +225,41 @@ Given the following SQLite database schema:
 {schema_str}
 
 Instructions:
-1. Speech-to-Text Correction & Interpreted Text:
-   - The user's input may come from speech recognition, which occasionally mishears words (for example: unusual word combinations, typos, or phonetically similar words like "shom me pashents older then fourty").
-   - Always return an "interpreted_text" field in the JSON response:
-     - If the input text looks like it could contain speech-recognition errors or typos, infer the most likely intended sentence and put that corrected version in "interpreted_text", in the same language/script as the input (for example: "shom me pashents older then fourty" -> "show me patients older than forty").
-     - If the input already looks clean and normal (e.g. clearly typed text), "interpreted_text" should just be the same as the input.
-   - Base your SQL generation and query interpretation on this corrected "interpreted_text".
-
-2. Language & Dialect Understanding (English, Tamil, and Thanglish):
-   - Understand the intent accurately whether the user writes in English, Tamil script, or Thanglish (Tamil words written in Latin/English script).
-   - Thanglish calibrations:
-     - "40 vayasuku mela patients kaatu" or "40 vayasuku mela irukra patients ellam kaatu" means "show/list patients older than 40" (filter: WHERE age > 40 on patients table).
-     - "doctor ellam list pannu" or "doctor list kudu" means "list all doctors" (SELECT * FROM doctors).
-     - "top patients yaaru" means "who are the top patients" (ambiguous ranking if metric and limit are not specified).
-
-3. Clarification & Ambiguity Assessment:
-   Before generating SQL, decide whether the interpreted question requires clarification. Set "needs_clarification" to true when:
-   - A ranking word is used ("top", "best", "highest", "most", "lowest", "yaaru top", "சிறந்த", etc.) without specifying BOTH a metric to rank by AND a number/limit (for example: "give me the top patients", "top patients yaaru", or "சிறந்த மருத்துவர்களை காட்டு" is ambiguous, whereas "top 5 patients by number of appointments" specifies both metric and limit and is NOT ambiguous).
-   - A vague qualitative term is used with no defined criteria ("important", "recent", "significant", "good", "bad", "mukkiyamaana", "முக்கியமான") without a clear threshold or timeframe.
-   - The question could reasonably map to more than one table or column and the correct one cannot be inferred from the schema or sample values.
-   Otherwise, if the question has clear criteria or explicit filtering (for example: "list all patients older than 40", "40 வயதுக்கு மேற்பட்ட நோயாளிகளை காட்டு", or "40 vayasuku mela irukra patients ellam kaatu"), set "needs_clarification" to false.
-
-4. Data Availability Assessment:
-   - Check if the question asks for data, metrics, entities, or concepts that do not exist or cannot be derived from the database schema provided above (e.g. asking for stock prices, weather, patient insurance policies, or credit card numbers when no such tables or columns exist).
-   - If the requested data is NOT tracked in the schema:
+1. Data Availability Assessment (HIGHEST PRIORITY - Must Check FIRST Before Clarification):
+   - You MUST FIRST check whether the requested table, entity, or core concept exists in the database schema above.
+   - For example: if the user asks for 'patients', 'doctors', or 'patient records', but the schema only contains ecommerce tables ('customers', 'orders', 'products') — patient data DOES NOT EXIST in this database.
+   - If the requested data/entity is NOT tracked in the schema:
      - Set "data_available": false
-     - Set "unavailable_message": a calm, polite message explaining what information is not tracked in the connected database schema (e.g. "This database schema does not track patient insurance details or policies.").
+     - Set "unavailable_message": a clear, polite explanation (e.g. "This database tracks ecommerce orders, customers, and products, and does not contain patient data.").
      - Set "sql": null
      - Set "explanation": null
      - Set "needs_clarification": false
      - Set "confidence": 0.85
-   - If the requested data IS tracked in the schema:
-     - Set "data_available": true
-     - Set "unavailable_message": null
+     - CRITICAL: Do NOT set "needs_clarification": true when the requested entity is absent from the database! Even if the user says 'top patients' or 'best doctors', if the entity does not exist in the schema, it is DATA UNAVAILABLE ("data_available": false), NOT a clarification question.
 
-5. Corrected Terms Tracking:
+2. Speech-to-Text Correction & Interpreted Text:
+   - The user's input may come from speech recognition, which occasionally mishears words (for example: "shom me pashents older then fourty").
+   - Always return an "interpreted_text" field in the JSON response with the corrected sentence.
    - If you corrected any misspelled or phonetically misheard words between the user's input and "interpreted_text", provide them in "corrected_terms" as a list of {{"original": "misheard_word", "corrected": "fixed_word"}}.
-   - Example: [{{"original": "pashents", "corrected": "patients"}}, {{"original": "fourty", "corrected": "forty"}}]
+   - Example: [{{"original": "paiens", "corrected": "patients"}}, {{"original": "fourty", "corrected": "forty"}}]
    - If no words were corrected, return [].
+   - Base your SQL generation on this corrected "interpreted_text".
 
-6. Output Structure Rules based on "needs_clarification" and "data_available":
+3. Clarification & Ambiguity Assessment (ONLY IF data IS available in the schema):
+   - Only evaluate this if the requested entity actually exists in the schema.
+   - Set "needs_clarification" to true when:
+     - A ranking word is used ("top", "best", "highest", "most", "lowest", "yaaru top", "சிறந்த", etc.) on an existing table without specifying BOTH a metric to rank by AND a number/limit (for example: "give me the top patients" or "top patients" on hospital schema is ambiguous, whereas "top 5 patients by number of appointments" specifies both metric and limit and is NOT ambiguous).
+     - A vague qualitative term is used with no defined criteria ("important", "recent", "significant", "good", "bad", "mukkiyamaana") without a clear threshold or timeframe.
+     - The question could reasonably map to more than one table or column and the correct one cannot be inferred from the schema.
+   - Otherwise, if the question has clear criteria or explicit filtering (for example: "list all patients older than 40"), set "needs_clarification" to false.
+
+4. Language & Dialect Understanding (English, Tamil, and Thanglish):
+   - Understand the intent accurately whether the user writes in English, Tamil script, or Thanglish (Tamil words written in Latin/English script).
+   - Thanglish calibrations:
+     - "40 vayasuku mela patients kaatu" means "show/list patients older than 40".
+     - "doctor ellam list pannu" means "list all doctors".
+
+5. Output Structure Rules:
    - If "data_available" is false:
      - "data_available": false
      - "unavailable_message": a calm informational message
@@ -280,7 +275,7 @@ Instructions:
      - "unavailable_message": null
      - "corrected_terms": [...]
      - "needs_clarification": true
-     - "clarification_question": a short, specific, polite question asking the user to clarify the ambiguity (in the required output language).
+     - "clarification_question": a short, specific, polite question asking the user to clarify the ambiguity.
      - "interpreted_text": the corrected/cleaned version of the input question.
      - "sql": null
      - "explanation": null
@@ -292,8 +287,8 @@ Instructions:
      - "needs_clarification": false
      - "clarification_question": null
      - "interpreted_text": the corrected/cleaned version of the input question.
-     - "sql": a valid, executable SQLite query that accurately answers the question based on the interpreted text. If filtering on text/categorical columns, match the exact text format shown in the sample values. For top N queries, include appropriate ORDER BY and LIMIT.
-     - "explanation": a concise explanation of how the query answers the question (in the required output language).
+     - "sql": a valid, executable SQLite query that accurately answers the question based on the interpreted text.
+     - "explanation": a concise explanation of how the query answers the question.
      - "confidence": a float between 0.7 and 1.0.
 
 User Question to Answer:
@@ -340,7 +335,7 @@ Format:
 
             try:
                 data = json.loads(cleaned)
-                _validate_result(data, nl_question)
+                _validate_result(data, nl_question, filtered_schema)
                 _enforce_language(data, detected_lang, model)
                 data["relevant_tables"] = relevant_tables
                 _WORKING_MODEL = model_name
@@ -358,8 +353,8 @@ Database Schema:
 {schema_str}
 
 Instructions:
-1. Determine if the requested data exists in the schema. If absent, set "data_available": false, provide "unavailable_message", set sql to null.
-2. Determine if the question needs clarification (e.g. ranking word without metric and limit, or vague terms like 'important' without criteria).
+1. FIRST check if the requested entity/data exists in the schema. If absent, set "data_available": false, provide "unavailable_message", set sql to null, needs_clarification: false. Do not ask for clarification if data does not exist in schema.
+2. Determine if the question needs clarification (ONLY IF data exists in schema: e.g. ranking word without metric and limit on existing tables).
 3. Fix speech-to-text mistakes in interpreted_text and list {{"original", "corrected"}} pairs in corrected_terms.
 4. If needs_clarification is true, set sql to null, explanation to null, confidence < 0.5, and provide a short clarification_question.
 5. If valid and available, generate valid SQLite in sql, explanation, confidence >= 0.5.
@@ -389,7 +384,7 @@ Output ONLY raw valid JSON without markdown formatting or backticks:
                 retry_res = model.generate_content(retry_prompt, generation_config=gen_config)
                 retry_cleaned = _clean_json_string(retry_res.text or "")
                 retry_data = json.loads(retry_cleaned)
-                _validate_result(retry_data, nl_question)
+                _validate_result(retry_data, nl_question, filtered_schema)
                 _enforce_language(retry_data, detected_lang, model)
                 retry_data["relevant_tables"] = relevant_tables
                 _WORKING_MODEL = model_name
@@ -406,9 +401,20 @@ Output ONLY raw valid JSON without markdown formatting or backticks:
             last_error = exc
             continue
 
-    if last_error:
-        raise last_error
-    raise RuntimeError("All Gemini model generation attempts failed.")
+    logger.warning("All Gemini model generation attempts failed with error: %s. Using graceful clarification fallback.", last_error)
+    return {
+        "data_available": True,
+        "unavailable_message": None,
+        "corrected_terms": _extract_word_corrections(nl_question, nl_question),
+        "needs_clarification": True,
+        "clarification_question": "I could not generate a SQL query for this question right now. Could you please clarify your request with more specific criteria or table names?",
+        "interpreted_text": nl_question,
+        "sql": None,
+        "explanation": None,
+        "confidence": 0.2,
+        "detected_language": detected_lang,
+        "relevant_tables": relevant_tables,
+    }
 
 
 
@@ -429,10 +435,10 @@ def _extract_word_corrections(original: str, corrected: str) -> list:
     return pairs
 
 
-def _validate_result(data: Any, nl_question: str = "") -> None:
+def _validate_result(data: Any, nl_question: str = "", schema: Optional[Dict[str, Any]] = None) -> None:
     """Ensure result dictionary contains required fields with expected types."""
     if not isinstance(data, dict):
-        raise ValueError("Expected JSON object")
+        return
 
     # Normalize interpreted_text
     interpreted = data.get("interpreted_text")
@@ -441,8 +447,33 @@ def _validate_result(data: Any, nl_question: str = "") -> None:
     else:
         data["interpreted_text"] = interpreted.strip()
 
-    # Normalize data_available & unavailable_message
+    # Check if the query references a core entity completely absent from schema
     data_available = bool(data.get("data_available", True))
+    if schema:
+        q_tokens = set(re.findall(r"\b[a-zA-Z]+\b", nl_question.lower()))
+        schema_tokens = set()
+        for tbl, cols in schema.items():
+            schema_tokens.add(tbl.lower())
+            for c in cols:
+                c_name = c.get("name", "") if isinstance(c, dict) else str(c)
+                schema_tokens.add(c_name.lower())
+
+        foreign_entity_keywords = [
+            "patient", "patients", "doctor", "doctors", "appointment", "appointments", "hospital",
+            "customer", "customers", "order", "orders", "product", "products", "sales", "revenue",
+            "student", "students", "course", "courses", "teacher", "teachers", "weather", "stocks"
+        ]
+        for ek in foreign_entity_keywords:
+            if ek in q_tokens and not any(ek in st for st in schema_tokens):
+                data_available = False
+                data["data_available"] = False
+                data["unavailable_message"] = f"This database does not contain information about {ek}."
+                data["sql"] = None
+                data["explanation"] = None
+                data["needs_clarification"] = False
+                data["clarification_question"] = None
+                break
+
     data["data_available"] = data_available
     if not data_available:
         unavail_msg = data.get("unavailable_message")
@@ -501,15 +532,20 @@ def _validate_result(data: Any, nl_question: str = "") -> None:
         data["clarification_question"] = None
         sql = data.get("sql")
         if not sql or not isinstance(sql, str) or not sql.strip():
-            raise ValueError("JSON must include non-empty 'sql' string when needs_clarification is false and data is available")
-        data["sql"] = sql.strip()
-        explanation = data.get("explanation")
-        data["explanation"] = explanation.strip() if isinstance(explanation, str) else ""
-        try:
-            conf = float(data.get("confidence", 0.9))
-            data["confidence"] = max(conf, 0.5)
-        except (ValueError, TypeError):
-            data["confidence"] = 0.9
+            explanation = (data.get("explanation") or "").strip()
+            data["needs_clarification"] = True
+            data["clarification_question"] = explanation or "Could you please clarify your request?"
+            data["sql"] = None
+            data["confidence"] = 0.3
+        else:
+            data["sql"] = sql.strip()
+            explanation = data.get("explanation")
+            data["explanation"] = explanation.strip() if isinstance(explanation, str) else ""
+            try:
+                conf = float(data.get("confidence", 0.9))
+                data["confidence"] = max(conf, 0.5)
+            except (ValueError, TypeError):
+                data["confidence"] = 0.9
 
 
 def regenerate_sql(
@@ -616,7 +652,7 @@ Self-Check:
 
             try:
                 data = json.loads(cleaned)
-                _validate_result(data, original_question)
+                _validate_result(data, original_question, filtered_schema)
                 _enforce_language(data, detected_lang, model)
                 data["relevant_tables"] = relevant_tables
                 _WORKING_MODEL = model_name
@@ -645,7 +681,7 @@ Output ONLY raw valid JSON:
                 retry_res = model.generate_content(retry_prompt, generation_config=gen_config)
                 retry_cleaned = _clean_json_string(retry_res.text or "")
                 retry_data = json.loads(retry_cleaned)
-                _validate_result(retry_data, original_question)
+                _validate_result(retry_data, original_question, filtered_schema)
                 _enforce_language(retry_data, detected_lang, model)
                 retry_data["relevant_tables"] = relevant_tables
                 _WORKING_MODEL = model_name

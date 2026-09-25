@@ -8,3 +8,8 @@ sentence-transformers
 faiss-cpu
 requests
 python-multipart
+
+# Testing
+pytest>=9.0
+pytest-cov>=7.0
+httpx
