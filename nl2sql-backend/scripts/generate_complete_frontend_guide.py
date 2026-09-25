@@ -301,7 +301,7 @@ def build_pdf(output_path: str):
     toc_data = [
         [Paragraph("<b>Section</b>", table_header_style), Paragraph("<b>Title & Core Content</b>", table_header_style), Paragraph("<b>Coverage</b>", table_header_style)],
         [Paragraph("<b>Section 1</b>", table_cell_bold), Paragraph("Component-by-Component Technical Guide", table_cell_style), Paragraph("Every file under frontend/src/ (App, client, all 10 UI components)", table_cell_style)],
-        [Paragraph("<b>Section 2</b>", table_cell_bold), Paragraph("Feature → Code Implementation Map", table_cell_style), Paragraph("All 8 reported features, functions, and 'what-if-fails' recovery analysis", table_cell_style)],
+        [Paragraph("<b>Section 2</b>", table_cell_bold), Paragraph("Feature → Code Implementation Map", table_cell_style), Paragraph("All 10 reported features, functions, and 'what-if-fails' recovery analysis", table_cell_style)],
     ]
     toc_table = Table(toc_data, colWidths=[70, 260, 174])
     toc_table.setStyle(TableStyle([
@@ -368,11 +368,12 @@ def build_pdf(output_path: str):
     story.append(render_comp_card(
         "frontend/src/App.jsx",
         "The top-level application coordinator managing active screens ('connect' vs 'chat'), persistent session re-hydration "
-        "from localStorage on mount, the glassmorphic ambient navbar with the official transparent NL2SQL brand logo and query badge, and the persistent '?' User Guide drawer trigger.",
+        "from localStorage on mount, the 100vw / 100dvh full-screen application shell, edge-to-edge navbar with the official transparent NL2SQL brand logo and query badge, and the persistent '?' User Guide drawer trigger.",
         [
+            ("100vw / 100dvh root shell", "Guarantees zero outer white margins, full viewport utilization on laptop/desktop, and mobile dynamic viewport compliance."),
             ("screen state ('connect' | 'chat')", "Controls whether the database onboarding screen or active chat workspace is rendered."),
             ("useEffect() / restoreSession", "Reads nl2sql_session from localStorage on mount and calls getSessionStatus() to verify server validity."),
-            ("handleConnected(sessionData)", "Stores validated session to localStorage and transitions UI directly to 'chat' screen."),
+            ("handleConnected(sessionData)", "Stores validated session to localStorage and transitions UI directly to full-screen 'chat' workspace."),
             ("handleDisconnect()", "Clears localStorage session and returns user to the connection screen cleanly."),
             ("isHelpOpen state", "Controls the visibility of the global HelpSidebar user guide drawer."),
         ]
@@ -412,9 +413,13 @@ def build_pdf(output_path: str):
 
     story.append(render_comp_card(
         "frontend/src/components/ChatWindow.jsx",
-        "The primary conversational glassmorphic workspace. Coordinates the message feed, history sidebar toggle, table schema pills, "
-        "question input box, voice recognition triggers, SQL inspection drawer, and write-operation confirmation modal.",
+        "The primary ChatGPT-style conversational full-screen workspace. Features a compact responsive database toolbar, independent message list scrolling, "
+        "a fixed bottom composer with multiline auto-resizing textarea, 44px touch targets for mobile accessibility, SQL inspection drawer, and write confirmation modal.",
         [
+            ("Full-viewport flex column", "Eliminates outer card margins, spanning 100% of viewport width and remaining vertical height."),
+            ("Compact Database Toolbar", "Presents Chats, New Chat, Connected status, Session ID, table list pills, and Disconnect in a compact responsive row."),
+            ("Independent Message Stream", "Scrolls conversation messages independently within a comfortable max-width reading column (max-w-4xl/5xl)."),
+            ("Fixed Bottom Composer", "Sticky composer with auto-resizing multiline textarea, Voice button (44px target), Send button (44px target), and Enter/Shift+Enter keyboard handling."),
             ("handleSend(e)", "Validates input, appends user message, submits to POST /api/query, and updates chat feed."),
             ("handleSelectConversation(id)", "Loads selected past conversation messages from backend and sets it as the active thread."),
             ("handleDeleteConversation(id)", "Deletes conversation via client API, removes from sidebar, and resets chat if active."),
@@ -427,11 +432,11 @@ def build_pdf(output_path: str):
     story.append(render_comp_card(
         "frontend/src/components/MessageBubble.jsx",
         "Renders individual chat messages in the conversation stream with Framer Motion slide-up animations. Distinctly styles user prompts "
-        "(teal gradients) and assistant responses (glassmorphic cards), displaying timestamps and subtle 'Heard as: ...' transcript captions.",
+        "(teal gradients, 85-90% responsive width on mobile) and assistant responses (white cards with subtle borders), displaying timestamps and subtle 'Heard as: ...' transcript captions.",
         [
             ("isMeaningfullyDifferent check", "Compares raw user input against Gemini's interpreted_text to detect voice recognition fixes."),
-            ("motion.div wrapper", "Animates message bubble on mount from y: 12, opacity: 0 to y: 0, opacity: 1 over 200ms."),
-            ("User vs Assistant styling", "User: bg-gradient-to-r from-teal-600 to-teal-700; Assistant: bg-white/80 backdrop-blur-md."),
+            ("motion.div wrapper", "Animates message bubble on mount from y: 10, opacity: 0 to y: 0, opacity: 1 over 200ms."),
+            ("Responsive Bubble Widths", "User messages: max-w-[88%] on mobile to [72%] on desktop; Assistant messages: max-w-[96%] on mobile."),
         ]
     ))
 
@@ -441,9 +446,9 @@ def build_pdf(output_path: str):
     story.append(render_comp_card(
         "frontend/src/components/SQLPreviewPanel.jsx",
         "The AI analysis card displayed within the chat stream. Shows the high-level natural language explanation, confidence score badge, "
-        "clarification request alert (if ambiguous), and the '</> View SQL' button that opens the detailed SQL drawer.",
+        "redesigned clarification response status component (if ambiguous), and the '</> View SQL' button that opens the detailed SQL drawer.",
         [
-            ("Clarification view", "Renders an amber prompt box when needs_clarification is True, inviting user refinement."),
+            ("Clarification view", "Renders a clean AI response/status component when needs_clarification is True, with low-confidence badge and prompt text."),
             ("Confidence badge calculation", "Colors badge based on confidence percentage (>80% Green, 50-80% Amber, <50% Rose)."),
             ("onViewSQL trigger", "Calls parent handler to open SQLDrawer with the query's AST, SQL text, and metadata."),
         ]
@@ -463,8 +468,9 @@ def build_pdf(output_path: str):
     story.append(render_comp_card(
         "frontend/src/components/ChartPanel.jsx",
         "Interactive data visualization container that switches between a formatted data table and dynamic Recharts charts (Bar or Line). "
-        "Automatically identifies categorical X-axis and numerical Y-axis columns from the SQL result set.",
+        "Features responsive self-contained horizontal scrolling (overflow-x-auto) to guarantee that wide tables never break the page layout.",
         [
+            ("Self-contained table scroll", "Tables scroll horizontally inside their container with clean borders, preventing page-level overflow."),
             ("View switcher (Table vs Chart)", "Provides pill buttons to toggle between structured data tables and charts."),
             ("Dynamic column detection", "Inspects first record to assign category strings to XAxis and numbers to YAxis."),
             ("ResponsiveContainer", "Auto-sizes charts to parent width with custom tooltips, grids, and teal accents."),
@@ -486,7 +492,7 @@ def build_pdf(output_path: str):
     story.append(render_comp_card(
         "frontend/src/components/HelpSidebar.jsx",
         "A slide-in orientation drawer providing a 6-step visual guide for evaluators and new users. Explains data connections, plain-English "
-        "and voice queries, interactive charts, SQL inspection, safe write protections, and session query history.",
+        "and voice queries, interactive charts, SQL viewing, safe write protections, and session query history.",
         [
             ("GUIDE_STEPS manifest", "6 visual cards detailing end-to-end user workflows with emoji icons and step numbers."),
             ("Backdrop overlay & Escape key", "Clicking backdrop or pressing Escape smoothly closes the guide drawer."),
@@ -506,9 +512,10 @@ def build_pdf(output_path: str):
 
     story.append(render_comp_card(
         "frontend/src/components/VoiceButton.jsx",
-        "A microphone input button leveraging the browser Web Speech API (SpeechRecognition). Uses a single ref-managed instance, defaults to "
-        "en-IN for English/Thanglish recognition, gracefully ignores benign no-speech/aborted events, and features pulsing audio waves.",
+        "A microphone input button leveraging the browser Web Speech API (SpeechRecognition). Meets the 44px minimum touch target requirement, "
+        "uses a single ref-managed instance, defaults to en-IN for English/Thanglish recognition, and gracefully ignores benign no-speech/aborted events.",
         [
+            ("44px Minimum Touch Target", "Sized with min-w-[44px] min-h-[44px] w-11 h-11 for effortless mobile and desktop tapping."),
             ("recognitionRef & isListeningRef", "Single instance lifecycle tracking to eliminate 'already started' / interruption errors."),
             ("lang = 'en-IN'", "Defaulted speech recognition language code handling Indian English and Thanglish phrases."),
             ("Graceful error filter", "Suppresses false-alarm errors for user silence ('no-speech') or manual clicks ('aborted')."),
@@ -544,7 +551,7 @@ def build_pdf(output_path: str):
     story.append(HRFlowable(width="100%", thickness=1.5, color=c_teal, spaceBefore=4, spaceAfter=8))
     story.append(Paragraph("SECTION 2: Feature → Code Implementation Map & Failure Analysis", h1_style))
     story.append(Paragraph(
-        "This section maps all 9 frontend architectural features to their exact implementing components, followed by an explicit "
+        "This section maps all 10 frontend architectural features to their exact implementing components, followed by an explicit "
         "<b>Failure / Bypass Analysis</b> (answering the jury's question: <i>'What happens if component X fails or is bypassed?'</i>).",
         body_style
     ))
@@ -553,16 +560,16 @@ def build_pdf(output_path: str):
     features_data = [
         {
             "id": "1",
-            "name": "Light Theme & Glassmorphism Design System",
-            "desc": "Modern light theme (#F4F7F7) with ambient blurred gradient glows, semi-transparent white cards (bg-white/80), backdrop blur (backdrop-blur-xl), slate borders, and soft shadows.",
-            "impl": "frontend/src/App.jsx -> bg-[#F4F7F7] & ambient glows<br/>frontend/src/index.css -> base glass styles<br/>frontend/src/components/ChatWindow.jsx -> glassmorphic workspace<br/>frontend/src/components/ConnectDBScreen.jsx -> glass card",
+            "name": "Light Theme & Polished Minimal Design System",
+            "desc": "Modern light theme (#F8FAFB) with subtle ambient gradient glows, clean white cards (bg-white/95), subtle slate borders (border-slate-200), teal accents, and soft drop shadows.",
+            "impl": "frontend/src/App.jsx -> bg-[#F8FAFB] & ambient glows<br/>frontend/src/index.css -> base CSS reset & font definitions<br/>frontend/src/components/ChatWindow.jsx -> full-screen workspace<br/>frontend/src/components/ConnectDBScreen.jsx -> onboarding card",
             "failure": "If CSS backdrop-filter is unsupported on an older browser, Tailwind's fallback background colors (bg-white/95) render full opacity with solid borders, maintaining 100% visual contrast and readability without layout breakage."
         },
         {
             "id": "2",
             "name": "Component & Transition Animations (Framer Motion)",
-            "desc": "Smooth spring slide-in drawers (x: 100% / -100%), scale-in modals (scale: 0.96 -> 1), message bubble slide-ups (y: 12 -> 0), and bouncing query generation indicators.",
-            "impl": "frontend/src/components/MessageBubble.jsx -> motion.div y: 12<br/>frontend/src/components/SQLDrawer.jsx -> spring slide-in<br/>frontend/src/components/HistorySidebar.jsx -> spring drawer<br/>frontend/src/components/ConfirmModal.jsx -> scale-in modal",
+            "desc": "Smooth spring slide-in drawers (x: 100% / -100%), scale-in modals (scale: 0.96 -> 1), message bubble slide-ups (y: 10 -> 0), and bouncing query generation indicators.",
+            "impl": "frontend/src/components/MessageBubble.jsx -> motion.div y: 10<br/>frontend/src/components/SQLDrawer.jsx -> spring slide-in<br/>frontend/src/components/HistorySidebar.jsx -> spring drawer<br/>frontend/src/components/ConfirmModal.jsx -> scale-in modal",
             "failure": "If JavaScript animation execution is disabled or interrupted (e.g. prefers-reduced-motion enabled in OS), Framer Motion resolves to the final keyframe immediately, rendering all elements in place with zero delay or visual artifacts."
         },
         {
@@ -582,8 +589,8 @@ def build_pdf(output_path: str):
         {
             "id": "5",
             "name": "Voice Input (SpeechRecognition & Thanglish Auto-Detect)",
-            "desc": "Microphone voice query input using a ref-managed SpeechRecognition instance set to en-IN. Auto-detects English and Thanglish without manual language toggles, and displays 'Heard as: ...' transcript corrections.",
-            "impl": "frontend/src/components/VoiceButton.jsx -> SpeechRecognition ref & en-IN<br/>frontend/src/components/MessageBubble.jsx -> 'Heard as: ...' tag<br/>frontend/src/utils/media.js -> safePlay() / safePause()",
+            "desc": "Microphone voice query input using a ref-managed SpeechRecognition instance set to en-IN. Meets the 44px minimum touch target, auto-detects English and Thanglish, and displays 'Heard as: ...' transcript corrections.",
+            "impl": "frontend/src/components/VoiceButton.jsx -> min-w-[44px] min-h-[44px] & en-IN<br/>frontend/src/components/MessageBubble.jsx -> 'Heard as: ...' tag<br/>frontend/src/utils/media.js -> safePlay() / safePause()",
             "failure": "If the user's browser does not support SpeechRecognition (e.g. Firefox/Safari), VoiceButton displays an informative toast: 'Speech recognition is not supported in this browser. Please use Chrome or Edge.' The text input remains fully functional."
         },
         {
@@ -613,6 +620,13 @@ def build_pdf(output_path: str):
             "desc": "Replaces static loading dots with Lightswind UI's animated AI Loading State indicator featuring monochromatic loader wavefronts (PulseBeam), live mono tabular elapsed timer, AI badge, and glassmorphic styling.",
             "impl": "frontend/src/components/lightswind/ai-loading-state.tsx -> AiLoadingState<br/>frontend/src/components/ChatWindow.jsx -> isPending indicator",
             "failure": "If animation execution is throttled, the timer hook continues calculating elapsed duration independently, and the container automatically unmounts upon query fulfillment, ensuring zero blocking or hung states."
+        },
+        {
+            "id": "10",
+            "name": "Full-Screen ChatGPT-Style Responsive Architecture (100vw, 100vh / 100dvh)",
+            "desc": "Redesigned application shell occupying 100vw and 100vh/100dvh without outer card margins. Features an edge-to-edge navbar, a compact responsive database toolbar, an independently scrolling message stream, a fixed bottom composer with multiline auto-resizing textarea, 44px mobile touch targets, and safe-area padding.",
+            "impl": "frontend/src/App.jsx -> 100vw/100dvh shell & edge-to-edge header<br/>frontend/src/components/ChatWindow.jsx -> compact toolbar, scroll stream & sticky composer<br/>frontend/src/index.css -> global box-sizing & 100% root dimensions<br/>frontend/src/components/VoiceButton.jsx -> min-w-[44px] min-h-[44px] touch target",
+            "failure": "If viewport dimensions dynamically change (such as virtual keyboard activation or orientation changes on mobile), 100dvh and flex constraints smoothly adapt the message stream without clipping or breaking page width."
         },
     ]
 

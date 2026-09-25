@@ -49,6 +49,7 @@ export default function ChatWindow({ session, onDisconnect }) {
   const [pendingWriteQuery, setPendingWriteQuery] = useState(null);
 
   const messagesEndRef = useRef(null);
+  const textareaRef = useRef(null);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -57,6 +58,14 @@ export default function ChatWindow({ session, onDisconnect }) {
   useEffect(() => {
     scrollToBottom();
   }, [messages, isPending]);
+
+  // Auto-resize textarea to fit multiline content up to max-height
+  useEffect(() => {
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto';
+      textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 140)}px`;
+    }
+  }, [inputValue]);
 
   // Load conversations on session mount
   const fetchConversations = async (autoSelect = false) => {
@@ -349,7 +358,7 @@ export default function ChatWindow({ session, onDisconnect }) {
   };
 
   return (
-    <div className="w-full max-w-6xl mx-auto p-2 sm:p-4 flex gap-4 h-[calc(100vh-4.5rem)]">
+    <div className="w-full h-full flex flex-col min-h-0 overflow-hidden bg-[#F8FAFB]">
       
       {/* History Drawer Component (Left Slide-in) */}
       <HistorySidebar
@@ -372,103 +381,105 @@ export default function ChatWindow({ session, onDisconnect }) {
         onClose={() => setIsSQLDrawerOpen(false)}
       />
 
-      {/* Main Glassmorphic Chat Workspace */}
-      <div className="flex-1 bg-white/75 backdrop-blur-xl rounded-3xl shadow-xl shadow-slate-200/50 border border-white/80 flex flex-col h-full overflow-hidden transition-all duration-200">
-        
-        {/* Header Bar */}
-        <div className="p-3.5 sm:p-4 border-b border-slate-200/70 bg-white/60 backdrop-blur-md shrink-0">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-            
-            <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
-              {/* History Toggle Button */}
-              <button
-                type="button"
-                onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-                className="px-2.5 py-1.5 rounded-xl bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 text-xs font-semibold flex items-center gap-1.5 shadow-2xs transition-all hover:border-teal-300"
-                title="Toggle Chat History"
-              >
-                <svg className="w-4 h-4 text-teal-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
-                </svg>
-                <span className="hidden sm:inline">Chats</span>
-                {conversations.length > 0 && (
-                  <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-slate-100 text-slate-600 font-mono">
-                    {conversations.length}
-                  </span>
-                )}
-              </button>
-
-              {/* + New Chat Quick Button */}
-              <button
-                type="button"
-                onClick={handleNewChat}
-                className="px-2.5 py-1.5 rounded-xl bg-teal-50 hover:bg-teal-100 text-teal-700 border border-teal-200/80 text-xs font-semibold flex items-center gap-1.5 shadow-2xs transition-all hover:border-teal-300 active:scale-95"
-                title="Start a new chat"
-              >
-                <svg className="w-3.5 h-3.5 text-teal-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 4v16m8-8H4" />
-                </svg>
-                <span>New Chat</span>
-              </button>
-
-              {/* Status Badge */}
-              <div className="flex items-center gap-2">
-                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-800 border border-emerald-200">
-                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-                  Connected
+      {/* Compact Database & Session Toolbar (Desktop & Mobile-adapted) */}
+      <div className="w-full border-b border-slate-200/80 bg-white/95 backdrop-blur-md shrink-0 px-3 sm:px-6 md:px-8 py-2 sm:py-2.5 z-10 shadow-2xs">
+        <div className="flex items-center justify-between gap-2 overflow-x-auto no-scrollbar py-0.5">
+          
+          <div className="flex items-center gap-1.5 sm:gap-2.5 shrink-0 flex-nowrap">
+            {/* History Toggle Button */}
+            <button
+              type="button"
+              onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+              className="px-2.5 py-1.5 rounded-xl bg-white hover:bg-slate-50 border border-slate-200/90 text-slate-700 text-xs font-semibold flex items-center gap-1.5 shadow-2xs transition-all hover:border-teal-300 min-h-[36px]"
+              title="Toggle Chat History"
+            >
+              <svg className="w-4 h-4 text-teal-600 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+              </svg>
+              <span className="hidden sm:inline">Chats</span>
+              {conversations.length > 0 && (
+                <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-slate-100 text-slate-600 font-mono">
+                  {conversations.length}
                 </span>
-                <span className="text-xs text-slate-400 font-mono hidden md:inline truncate max-w-[140px]" title={sessionId}>
-                  {sessionId}
-                </span>
-              </div>
+              )}
+            </button>
 
-              {/* Toggleable Table List Pills */}
-              <button
-                type="button"
-                onClick={() => setShowTables(!showTables)}
-                className="text-xs font-medium text-teal-700 hover:text-teal-900 flex items-center gap-1 bg-teal-50/60 px-2.5 py-1 rounded-lg border border-teal-200/60 transition-colors"
-              >
-                <span>{tables.length} tables</span>
-                <svg className={`w-3.5 h-3.5 transition-transform ${showTables ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" />
-                </svg>
-              </button>
+            {/* + New Chat Quick Button */}
+            <button
+              type="button"
+              onClick={handleNewChat}
+              className="px-2.5 py-1.5 rounded-xl bg-teal-50 hover:bg-teal-100 text-teal-700 border border-teal-200/80 text-xs font-semibold flex items-center gap-1.5 shadow-2xs transition-all hover:border-teal-300 active:scale-95 min-h-[36px]"
+              title="Start a new chat"
+            >
+              <svg className="w-3.5 h-3.5 text-teal-600 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 4v16m8-8H4" />
+              </svg>
+              <span className="whitespace-nowrap">New Chat</span>
+            </button>
+
+            <div className="h-4 w-px bg-slate-200 mx-0.5 hidden sm:block shrink-0" />
+
+            {/* Status Badge */}
+            <div className="flex items-center gap-1.5 shrink-0">
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] sm:text-xs font-semibold bg-emerald-50 text-emerald-800 border border-emerald-200 shrink-0">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                <span>Connected</span>
+              </span>
+              <span className="text-[11px] text-slate-400 font-mono hidden md:inline truncate max-w-[130px]" title={sessionId}>
+                {sessionId}
+              </span>
             </div>
 
-            {/* Disconnect Button */}
+            {/* Toggleable Table List Pills */}
             <button
-              onClick={onDisconnect}
-              className="self-end sm:self-auto px-3 py-1.5 text-xs font-semibold text-slate-600 hover:text-rose-700 bg-white hover:bg-rose-50 border border-slate-200 hover:border-rose-200 rounded-xl transition-all flex items-center gap-1.5 shadow-2xs"
+              type="button"
+              onClick={() => setShowTables(!showTables)}
+              className="text-xs font-medium text-teal-700 hover:text-teal-900 flex items-center gap-1 bg-teal-50/60 px-2.5 py-1 rounded-lg border border-teal-200/60 transition-colors shrink-0 min-h-[32px]"
+              title="Toggle database table list"
             >
-              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+              <span className="whitespace-nowrap">{tables.length} tables</span>
+              <svg className={`w-3.5 h-3.5 transition-transform duration-150 ${showTables ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" />
               </svg>
-              <span>Disconnect</span>
             </button>
           </div>
 
-          {/* Tables Bar Drawer */}
-          {showTables && (
-            <motion.div
-              initial={{ opacity: 0, height: 0 }}
-              animate={{ opacity: 1, height: 'auto' }}
-              exit={{ opacity: 0, height: 0 }}
-              className="mt-3 pt-3 border-t border-slate-100 flex flex-wrap gap-1.5"
-            >
-              {tables.map((table, idx) => (
-                <span
-                  key={idx}
-                  className="px-2.5 py-1 rounded-lg text-[11px] font-mono bg-white text-slate-700 border border-slate-200 shadow-2xs"
-                >
-                  {table}
-                </span>
-              ))}
-            </motion.div>
-          )}
+          {/* Disconnect Button */}
+          <button
+            onClick={onDisconnect}
+            className="px-2.5 sm:px-3 py-1.5 text-xs font-semibold text-slate-600 hover:text-rose-700 bg-white hover:bg-rose-50 border border-slate-200 hover:border-rose-200 rounded-xl transition-all flex items-center gap-1.5 shadow-2xs shrink-0 min-h-[36px]"
+            title="Disconnect from database"
+          >
+            <svg className="w-3.5 h-3.5 text-rose-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+            </svg>
+            <span className="hidden sm:inline">Disconnect</span>
+          </button>
         </div>
 
-        {/* Scrollable Message List */}
-        <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-3">
+        {/* Collapsible Tables Drawer */}
+        {showTables && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: 'auto' }}
+            exit={{ opacity: 0, height: 0 }}
+            className="mt-2.5 pt-2 border-t border-slate-100 flex flex-wrap gap-1.5 max-h-32 overflow-y-auto"
+          >
+            {tables.map((table, idx) => (
+              <span
+                key={idx}
+                className="px-2.5 py-0.5 rounded-md text-[11px] font-mono bg-slate-50 text-slate-700 border border-slate-200 shadow-2xs"
+              >
+                {table}
+              </span>
+            ))}
+          </motion.div>
+        )}
+      </div>
+
+      {/* Scrollable Message List (Full Height, Independent Scrolling) */}
+      <div className="flex-1 min-h-0 overflow-y-auto w-full">
+        <div className="w-full max-w-4xl lg:max-w-5xl mx-auto px-3 sm:px-6 md:px-8 py-4 sm:py-6 space-y-4">
           {messages.map((msg) => {
             if (msg.role === 'user') {
               return (
@@ -488,14 +499,14 @@ export default function ChatWindow({ session, onDisconnect }) {
               return (
                 <motion.div
                   key={msg.id}
-                  initial={{ opacity: 0, y: 12 }}
+                  initial={{ opacity: 0, y: 10 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ duration: 0.2 }}
-                  className="flex w-full my-3 justify-start"
+                  className="flex w-full my-2 sm:my-3 justify-start"
                 >
-                  <div className="max-w-[98%] sm:max-w-[90%] md:max-w-[85%] flex flex-col items-start w-full">
+                  <div className="w-full max-w-full sm:max-w-[96%] md:max-w-[92%] flex flex-col items-start">
                     
-                    {/* Explanation Card (SQL hidden by default, revealable via View SQL) */}
+                    {/* Explanation Card */}
                     <SQLPreviewPanel
                       queryData={msg.queryData}
                       onViewSQL={handleOpenSQL}
@@ -545,51 +556,64 @@ export default function ChatWindow({ session, onDisconnect }) {
                 size="md"
                 showTimer={true}
                 showBadge={true}
-                className="bg-white/85 text-teal-900 border-teal-200/80 shadow-xs hover:border-teal-300"
+                className="bg-white/95 text-teal-900 border-teal-200/80 shadow-2xs hover:border-teal-300"
               />
             </motion.div>
           )}
 
           <div ref={messagesEndRef} />
         </div>
+      </div>
 
-        {/* Bottom Bar Controls & Input */}
-        <div className="p-3 sm:p-4 border-t border-slate-200/70 bg-white/60 backdrop-blur-md shrink-0">
-          <form onSubmit={handleSend} className="flex items-center gap-2">
-            
-            {/* Text Input */}
-            <input
-              type="text"
-              value={inputValue}
-              onChange={(e) => setInputValue(e.target.value)}
-              onKeyDown={handleKeyDown}
-              placeholder="Ask a question about your database in natural language..."
-              disabled={isPending}
-              className="flex-1 px-4 py-2.5 sm:py-3 rounded-2xl border border-slate-200/90 bg-white/90 text-slate-900 placeholder-slate-400 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 shadow-2xs transition-all disabled:opacity-60"
-            />
+      {/* Fixed / Sticky ChatGPT-style Bottom Composer */}
+      <div className="w-full shrink-0 border-t border-slate-200/80 bg-white/95 backdrop-blur-md px-3 sm:px-6 md:px-8 pt-2.5 pb-[max(0.75rem,env(safe-area-inset-bottom))] z-10 shadow-xs">
+        <div className="w-full max-w-4xl lg:max-w-5xl mx-auto">
+          <form onSubmit={handleSend} className="relative flex flex-col gap-1.5">
+            <div className="flex items-end gap-1.5 sm:gap-2 p-1.5 sm:p-2 bg-slate-50 hover:bg-white focus-within:bg-white border border-slate-200/90 focus-within:border-teal-500/80 focus-within:ring-3 focus-within:ring-teal-500/15 rounded-2xl sm:rounded-3xl transition-all shadow-2xs">
+              
+              {/* Multiline expandable textarea */}
+              <textarea
+                ref={textareaRef}
+                rows={1}
+                value={inputValue}
+                onChange={(e) => setInputValue(e.target.value)}
+                onKeyDown={handleKeyDown}
+                placeholder="Ask a question about your database in natural language..."
+                disabled={isPending}
+                className="flex-1 max-h-36 min-h-[40px] sm:min-h-[44px] px-3 py-2 text-sm text-slate-800 placeholder-slate-400 bg-transparent resize-none focus:outline-none disabled:opacity-60 leading-relaxed font-sans"
+              />
 
-            {/* Voice Input Button */}
-            <VoiceButton
-              onTranscript={handleVoiceComplete}
-              onRecordingComplete={handleVoiceComplete}
-              disabled={isPending}
-            />
+              {/* Voice Button (min 44px touch target) */}
+              <div className="shrink-0 min-w-[44px] min-h-[44px] flex items-center justify-center">
+                <VoiceButton
+                  onTranscript={handleVoiceComplete}
+                  onRecordingComplete={handleVoiceComplete}
+                  disabled={isPending}
+                />
+              </div>
 
-            {/* Send Button */}
-            <button
-              type="submit"
-              disabled={!inputValue.trim() || isPending}
-              className="py-2.5 px-4 sm:py-3 sm:px-5 bg-gradient-to-r from-teal-600 to-teal-700 hover:from-teal-700 hover:to-teal-800 text-white font-semibold text-sm rounded-2xl shadow-sm shadow-teal-600/20 transition-all flex items-center justify-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed shrink-0"
-            >
-              <span className="hidden sm:inline">Send</span>
-              <svg className="w-4 h-4 rotate-90" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
-              </svg>
-            </button>
+              {/* Send Button (min 44px touch target) */}
+              <button
+                type="submit"
+                disabled={!inputValue.trim() || isPending}
+                className="min-w-[44px] min-h-[44px] px-3.5 sm:px-4 rounded-xl sm:rounded-2xl bg-teal-600 hover:bg-teal-700 text-white font-semibold text-xs sm:text-sm shadow-sm shadow-teal-600/20 transition-all flex items-center justify-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed shrink-0 active:scale-95"
+                title="Send message (Enter)"
+              >
+                <span className="hidden sm:inline">Send</span>
+                <svg className="w-4 h-4 rotate-90" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+                </svg>
+              </button>
 
+            </div>
+
+            {/* Helper Caption */}
+            <div className="flex items-center justify-between px-2 text-[10px] text-slate-400">
+              <span>Press <kbd className="px-1 py-0.5 bg-slate-100 rounded text-slate-500 font-mono">Enter ↵</kbd> to send, <kbd className="px-1 py-0.5 bg-slate-100 rounded text-slate-500 font-mono">Shift + Enter</kbd> for new line</span>
+              <span className="hidden sm:inline font-medium text-slate-400/80">NL-to-SQL Assistant Engine</span>
+            </div>
           </form>
         </div>
-
       </div>
 
       {/* Confirm Modal Overlay for Write Operations */}

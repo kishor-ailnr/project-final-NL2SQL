@@ -13,17 +13,29 @@ export default function SQLPreviewPanel({ queryData = {}, onViewSQL }) {
   // If clarification is required, render the clarification box
   if (needs_clarification) {
     return (
-      <div className="w-full my-2 p-4 rounded-2xl bg-amber-50/80 border border-amber-200/80 text-amber-900 text-sm shadow-xs flex items-start gap-3">
-        <span className="text-xl shrink-0 mt-0.5" role="img" aria-label="clarification">❓</span>
-        <div className="space-y-1">
-          <h4 className="font-semibold text-xs uppercase tracking-wider text-amber-800">
-            Clarification Required
-          </h4>
-          <p className="text-sm leading-relaxed text-amber-950">
-            {clarification_question || 'Could you please clarify your question?'}
-          </p>
+      <motion.div
+        initial={{ opacity: 0, y: 6 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.2 }}
+        className="w-full my-2 bg-amber-50/90 border border-amber-200/90 rounded-2xl p-3.5 sm:p-4 shadow-2xs text-amber-950"
+      >
+        <div className="flex items-center justify-between gap-2 mb-2 pb-2 border-b border-amber-200/60">
+          <div className="flex items-center gap-2">
+            <span className="w-5 h-5 rounded-full bg-amber-200/80 text-amber-900 flex items-center justify-center text-xs font-bold shrink-0">
+              ?
+            </span>
+            <span className="font-bold text-xs uppercase tracking-wider text-amber-900">
+              Clarification Required
+            </span>
+          </div>
+          <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-amber-200/60 text-amber-800">
+            Ambiguous Query
+          </span>
         </div>
-      </div>
+        <p className="text-xs sm:text-sm leading-relaxed text-amber-900">
+          {clarification_question || 'Could you please clarify your question?'}
+        </p>
+      </motion.div>
     );
   }
 
@@ -49,30 +61,30 @@ export default function SQLPreviewPanel({ queryData = {}, onViewSQL }) {
       initial={{ opacity: 0, scale: 0.98 }}
       animate={{ opacity: 1, scale: 1 }}
       transition={{ duration: 0.2 }}
-      className="w-full my-2 bg-white/80 backdrop-blur-md border border-slate-200/70 rounded-2xl p-4 shadow-sm"
+      className="w-full my-2 bg-white/95 border border-slate-200/80 rounded-2xl p-3.5 sm:p-4 shadow-2xs hover:border-slate-300 transition-colors"
     >
       {/* Top Meta Bar */}
       <div className="flex flex-wrap items-center justify-between gap-2 mb-2.5 pb-2.5 border-b border-slate-100">
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 min-w-0">
           <img
             src={logoImg}
             alt="NL2SQL"
-            className="w-5 h-5 object-contain shrink-0"
+            className="w-4 h-4 sm:w-5 sm:h-5 object-contain shrink-0"
           />
-          <span className="text-xs font-semibold text-slate-700">
+          <span className="text-xs font-semibold text-slate-800 truncate">
             Assistant Analysis
           </span>
 
           {isWriteQuery && (
-            <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-100 text-amber-900 border border-amber-300">
+            <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-100 text-amber-900 border border-amber-300 shrink-0">
               Write Operation (Pending)
             </span>
           )}
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
           {/* Confidence Badge */}
-          <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium border ${badgeColorClass}`}>
+          <span className={`inline-flex items-center gap-1.5 px-2 sm:px-2.5 py-0.5 rounded-full text-[11px] sm:text-xs font-medium border ${badgeColorClass}`}>
             <span className={`w-1.5 h-1.5 rounded-full ${badgeDotClass}`}></span>
             {confPercent}% confident
           </span>
@@ -82,10 +94,10 @@ export default function SQLPreviewPanel({ queryData = {}, onViewSQL }) {
             <button
               type="button"
               onClick={() => onViewSQL(queryData)}
-              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-teal-50 hover:bg-teal-100/80 border border-teal-200/70 text-teal-800 text-xs font-semibold transition-all shadow-2xs group"
+              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-teal-50 hover:bg-teal-100/80 border border-teal-200/70 text-teal-800 text-xs font-semibold transition-all shadow-2xs group min-h-[30px]"
               title="Inspect generated SQL in sidebar"
             >
-              <svg className="w-3.5 h-3.5 text-teal-600 font-bold" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <svg className="w-3.5 h-3.5 text-teal-600 font-bold shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
               </svg>
               <span>View SQL</span>
@@ -96,7 +108,7 @@ export default function SQLPreviewPanel({ queryData = {}, onViewSQL }) {
 
       {/* Explanation text */}
       {explanation ? (
-        <p className="text-xs sm:text-sm text-slate-700 leading-relaxed">
+        <p className="text-xs sm:text-sm text-slate-700 leading-relaxed font-normal">
           {explanation}
         </p>
       ) : (

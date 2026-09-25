@@ -164,7 +164,7 @@ export default function VoiceButton({
         onClick={handleClick}
         disabled={disabled}
         title={isRecording ? 'Click to stop listening' : 'Click to speak question'}
-        className={`relative p-2.5 sm:p-3 rounded-2xl border transition-all duration-200 shrink-0 flex items-center justify-center ${
+        className={`relative w-11 h-11 min-w-[44px] min-h-[44px] rounded-xl sm:rounded-2xl border transition-all duration-200 shrink-0 flex items-center justify-center ${
           isRecording
             ? 'bg-rose-500 hover:bg-rose-600 text-white border-rose-400 ring-4 ring-rose-200 animate-pulse'
             : errorMessage

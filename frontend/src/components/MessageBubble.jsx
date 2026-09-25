@@ -18,20 +18,20 @@ export default function MessageBubble({ role, content, rawContent, interpretedTe
 
   return (
     <motion.div
-      initial={{ opacity: 0, y: 12 }}
+      initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.2 }}
-      className={`flex w-full my-2.5 ${isUser ? 'justify-end' : 'justify-start'}`}
+      className={`flex w-full my-2 sm:my-2.5 ${isUser ? 'justify-end' : 'justify-start'}`}
     >
-      <div className={`max-w-[85%] sm:max-w-[75%] md:max-w-[65%] flex flex-col ${isUser ? 'items-end' : 'items-start'}`}>
+      <div className={`${isUser ? 'max-w-[88%] sm:max-w-[80%] md:max-w-[72%]' : 'max-w-[96%] sm:max-w-[92%] md:max-w-[88%]'} flex flex-col ${isUser ? 'items-end' : 'items-start'}`}>
         
         {/* Message Bubble Box */}
         <div
           title={isMeaningfullyDifferent ? `Original: ${rawContent || content}` : undefined}
-          className={`px-4 py-3 text-sm leading-relaxed shadow-xs transition-colors duration-150 break-words ${
+          className={`px-3.5 py-2.5 sm:px-4 sm:py-3 text-sm leading-relaxed shadow-xs transition-colors duration-150 break-words ${
             isUser
               ? 'bg-gradient-to-r from-teal-600 to-teal-700 text-white rounded-2xl rounded-br-xs shadow-sm shadow-teal-700/10'
-              : 'bg-white/80 backdrop-blur-md text-slate-800 border border-slate-200/70 rounded-2xl rounded-bl-xs shadow-2xs'
+              : 'bg-white border border-slate-200/80 text-slate-800 rounded-2xl rounded-bl-xs shadow-2xs'
           }`}
         >
           <div>{displayText}</div>
