@@ -14,8 +14,9 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-# Configure Gemini client
-genai.configure(api_key=GEMINI_API_KEY, transport="rest")
+# Configure Gemini client if API key is present
+if GEMINI_API_KEY:
+    genai.configure(api_key=GEMINI_API_KEY, transport="rest")
 
 # Prioritized list of active Gemini models (fastest first)
 MODELS_TO_TRY = [

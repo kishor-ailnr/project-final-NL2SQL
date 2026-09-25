@@ -18,11 +18,12 @@ if not env_path.exists() and (WORKSPACE_DIR / ".env").exists():
 
 load_dotenv(dotenv_path=env_path)
 
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
 
-if not GEMINI_API_KEY or not GEMINI_API_KEY.strip():
-    raise ValueError(
-        "GEMINI_API_KEY is missing or empty. Please set a valid GEMINI_API_KEY in your .env file."
+if not GEMINI_API_KEY:
+    import logging
+    logging.getLogger(__name__).warning(
+        "GEMINI_API_KEY is missing or empty. Queries requiring Gemini will fail unless GEMINI_API_KEY is provided."
     )
 
 # SQLite Database URLs
