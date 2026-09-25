@@ -455,10 +455,12 @@ def build_pdf(output_path: str):
     story.append(render_file_card(
         "nl2sql-backend/app/services/sql_generator.py",
         "The AI reasoning engine powered by Google Gemini. In a single optimized call, it receives schema information with real column sample "
-        "values, handles English/Tamil/Thanglish inputs, evaluates question ambiguity (clarification layer), cleans speech-to-text transcript errors "
-        "(interpreted_text), and outputs strict JSON containing the SQL, explanation, and confidence rating.",
+        "values, handles English/Tamil/Thanglish inputs with strict prompt language constraints, evaluates question ambiguity (clarification layer), "
+        "cleans speech-to-text transcript errors (interpreted_text), and outputs strict JSON containing the SQL, explanation, and confidence rating.",
         [
             ("generate_sql(...)", "Constructs grounded prompt with sample values and few-shot Thanglish calibration; returns parsed structured JSON."),
+            ("detect_input_language(text)", "Detects Tamil Unicode range (\\u0B80-\\u0BFF), Thanglish lexical patterns, or English."),
+            ("_enforce_language(data, lang, model)", "Guarantees strict explanation/clarification language matching with automated Tamil translation fallback."),
             ("generate_title(question, sql)", "Generates a crisp 3-to-5 word chat title from the user's initial question."),
         ]
     ))
@@ -556,9 +558,9 @@ def build_pdf(output_path: str):
         {
             "id": "4",
             "name": "Multilingual Support (English, Tamil, Thanglish)",
-            "desc": "Auto-detects and understands queries in English, Tamil script, or Thanglish (Tamil written in Latin script) without manual language toggles.",
-            "impl": "nl2sql-backend/app/services/sql_generator.py -> generate_sql()<br/>frontend/src/components/VoiceButton.jsx -> lang='en-IN'",
-            "failure": "If heavy regional slang is used that the model cannot parse, the prompt falls back to schema keyword matching; if intent cannot be mapped to schema columns, it triggers the clarification layer rather than running invalid SQL."
+            "desc": "Auto-detects query script/language via detect_input_language() and enforces matching explanation/clarification in Tamil script (தமிழ் எழுத்தில்) or Thanglish ('Understood — ' prefix in English) via late prompt positioning and self-check instructions.",
+            "impl": "nl2sql-backend/app/services/sql_generator.py -> detect_input_language()<br/>nl2sql-backend/app/services/sql_generator.py -> _enforce_language()<br/>nl2sql-backend/app/routers/query.py -> handle_query()",
+            "failure": "If the LLM returns an English explanation for a Tamil query, _enforce_language() intercepts the response and performs an automated translation to natural Tamil script, guaranteeing that user language expectations are never violated."
         },
         {
             "id": "5",

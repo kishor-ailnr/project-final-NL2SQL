@@ -96,6 +96,7 @@ class QueryResponse(BaseModel):
     result: List[Any] = []
     chart_type: str = "none"
     interpreted_text: Optional[str] = None
+    detected_language: Optional[str] = None
 
 
 class HistoryConversation(BaseModel):
@@ -205,6 +206,7 @@ def handle_query(
         )
 
     interpreted_text = gen_data.get("interpreted_text") or payload.text
+    detected_lang = gen_data.get("detected_language")
 
     # Handle clarification needed before validation or execution
     if gen_data.get("needs_clarification", False):
@@ -238,6 +240,7 @@ def handle_query(
             result=[],
             chart_type="none",
             interpreted_text=interpreted_text,
+            detected_language=detected_lang,
         )
 
     sql = gen_data.get("sql", "")
@@ -275,6 +278,7 @@ def handle_query(
             result=[],
             chart_type="none",
             interpreted_text=interpreted_text,
+            detected_language=detected_lang,
         )
 
     # 3. Execute SQL
@@ -308,6 +312,7 @@ def handle_query(
             result=[],
             chart_type="none",
             interpreted_text=interpreted_text,
+            detected_language=detected_lang,
         )
 
     # 4. Save successful query to query_history in meta_db
@@ -338,4 +343,5 @@ def handle_query(
         result=exec_result,
         chart_type="none",
         interpreted_text=interpreted_text,
+        detected_language=detected_lang,
     )
