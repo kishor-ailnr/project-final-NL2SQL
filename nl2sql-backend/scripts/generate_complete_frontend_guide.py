@@ -513,9 +513,12 @@ def build_pdf(output_path: str):
     story.append(render_comp_card(
         "frontend/src/components/VoiceButton.jsx",
         "A microphone input button leveraging the browser Web Speech API (SpeechRecognition). Meets the 44px minimum touch target requirement, "
-        "uses a single ref-managed instance, defaults to en-IN for English/Thanglish recognition, and gracefully ignores benign no-speech/aborted events.",
+        "uses a single ref-managed instance, defaults to en-IN for English/Thanglish recognition, sets upfront expectations via always-visible "
+        "capability hints, and provides a subtle inline safety-net hint when speech recognition captures low-confidence or fragmented Tamil attempts.",
         [
             ("44px Minimum Touch Target", "Sized with min-w-[44px] min-h-[44px] w-11 h-11 for effortless mobile and desktop tapping."),
+            ("Always-Visible Capability Hint", "Presents 'Voice works best in English or Thanglish. For Tamil, typing is more accurate' to set expectations upfront."),
+            ("Low-Confidence Tamil Safety Net", "Displays an inline chip 'Didn't catch that clearly? You can also type in Tamil or English' when audio is fragmented."),
             ("recognitionRef & isListeningRef", "Single instance lifecycle tracking to eliminate 'already started' / interruption errors."),
             ("lang = 'en-IN'", "Defaulted speech recognition language code handling Indian English and Thanglish phrases."),
             ("Graceful error filter", "Suppresses false-alarm errors for user silence ('no-speech') or manual clicks ('aborted')."),
@@ -588,9 +591,9 @@ def build_pdf(output_path: str):
         },
         {
             "id": "5",
-            "name": "Voice Input (SpeechRecognition & Thanglish Auto-Detect)",
-            "desc": "Microphone voice query input using a ref-managed SpeechRecognition instance set to en-IN. Meets the 44px minimum touch target, auto-detects English and Thanglish, and displays 'Heard as: ...' transcript corrections.",
-            "impl": "frontend/src/components/VoiceButton.jsx -> min-w-[44px] min-h-[44px] & en-IN<br/>frontend/src/components/MessageBubble.jsx -> 'Heard as: ...' tag<br/>frontend/src/utils/media.js -> safePlay() / safePause()",
+            "name": "Voice Input (SpeechRecognition, Language Mitigation & Thanglish)",
+            "desc": "Microphone voice query input using a ref-managed SpeechRecognition instance set to en-IN. Sets upfront expectations ('Voice works best in English or Thanglish. For Tamil, typing is more accurate') and shows an inline safety-net chip ('Didn't catch that clearly? You can also type in Tamil or English') when speech is low-confidence or fragmented. English and Thanglish voice input work seamlessly, while typed Tamil script delivers 100% precision.",
+            "impl": "frontend/src/components/VoiceButton.jsx -> capability hint & safety net<br/>frontend/src/components/ChatWindow.jsx -> static search bar & input caption<br/>frontend/src/components/MessageBubble.jsx -> 'Heard as: ...' tag",
             "failure": "If the user's browser does not support SpeechRecognition (e.g. Firefox/Safari), VoiceButton displays an informative toast: 'Speech recognition is not supported in this browser. Please use Chrome or Edge.' The text input remains fully functional."
         },
         {

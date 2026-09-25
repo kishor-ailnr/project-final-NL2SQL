@@ -607,6 +607,10 @@ export default function ChatWindow({ session, onDisconnect }) {
 
             </div>
           </form>
+          {/* Always-visible input capability hint */}
+          <p className="text-center text-[11px] text-slate-400/80 mt-1 select-none font-normal">
+            Voice works best in English or Thanglish. For Tamil, typing is more accurate.
+          </p>
         </div>
       </div>
 

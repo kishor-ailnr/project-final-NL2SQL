@@ -13,12 +13,15 @@ export default function VoiceButton({
 }) {
   const [isRecording, setIsRecording] = useState(false);
   const [errorMessage, setErrorMessage] = useState(null);
+  const [lowConfidenceHint, setLowConfidenceHint] = useState(null);
   const [isSupported, setIsSupported] = useState(true);
 
   // Single recognition instance stored in a ref (created once)
   const recognitionRef = useRef(null);
   // Boolean guard ref to track actual recognition lifecycle
   const isListeningRef = useRef(false);
+  // Timeout ref for dismissing low-confidence hint
+  const hintTimeoutRef = useRef(null);
 
   // Initialize SpeechRecognition once on mount
   useEffect(() => {
@@ -38,13 +41,43 @@ export default function VoiceButton({
       isListeningRef.current = true;
       setIsRecording(true);
       setErrorMessage(null);
+      setLowConfidenceHint(null);
+      if (hintTimeoutRef.current) {
+        clearTimeout(hintTimeoutRef.current);
+      }
     };
 
     recognition.onresult = (event) => {
       if (event.results && event.results.length > 0) {
-        const transcript = event.results[0][0].transcript;
+        const resultItem = event.results[0][0];
+        const transcript = resultItem.transcript;
+        const confidence = typeof resultItem.confidence === 'number' ? resultItem.confidence : 1.0;
+
         if (transcript && transcript.trim()) {
           const text = transcript.trim();
+
+          // UX Safety Net: Check if recognized transcript has low confidence or appears
+          // to be an unclear attempt at Tamil (e.g. very short, single disjointed syllables,
+          // or non-coherent fragments produced by en-IN recognition on pure Tamil speech)
+          const words = text.toLowerCase().split(/\s+/).filter(Boolean);
+          const isSingleShortWord = words.length === 1 && words[0].length <= 5;
+          const isLowScore = confidence > 0 && confidence < 0.65;
+          const isFragmentedTamilAttempt =
+            words.length <= 2 &&
+            /^(ah|eh|oh|da|pa|en|illai|inga|enga|nan|nee|oru|enna|avanga|kaatu|kudu)$/i.test(words[0]);
+
+          if (isLowScore || isSingleShortWord || isFragmentedTamilAttempt) {
+            setLowConfidenceHint("Didn't catch that clearly? You can also type in Tamil or English.");
+            if (hintTimeoutRef.current) {
+              clearTimeout(hintTimeoutRef.current);
+            }
+            hintTimeoutRef.current = setTimeout(() => {
+              setLowConfidenceHint(null);
+            }, 9000);
+          } else {
+            setLowConfidenceHint(null);
+          }
+
           if (onTranscript) onTranscript(text);
           if (onRecordingComplete) onRecordingComplete(text);
         }
@@ -86,6 +119,9 @@ export default function VoiceButton({
         }
         recognitionRef.current = null;
       }
+      if (hintTimeoutRef.current) {
+        clearTimeout(hintTimeoutRef.current);
+      }
       isListeningRef.current = false;
     };
   }, []);
@@ -119,6 +155,7 @@ export default function VoiceButton({
     } else {
       // Guarded start
       setErrorMessage(null);
+      setLowConfidenceHint(null);
       try {
         recognition.lang = 'en-IN';
         recognition.start();
@@ -139,7 +176,33 @@ export default function VoiceButton({
 
   return (
     <div className="relative inline-flex items-center shrink-0">
-      {/* Inline Error Popover */}
+      {/* 2. Small always-visible hint text near the mic button setting correct upfront expectations */}
+      <span
+        className="hidden md:inline-block text-[11px] text-slate-400 select-none mr-2 max-w-[195px] leading-tight text-right font-normal"
+        title="Voice recognition works best with English and Thanglish. For Tamil, typing is more accurate."
+      >
+        Voice works best in English or Thanglish. For Tamil, typing is more accurate.
+      </span>
+
+      {/* 1. Subtle inline safety-net hint below the input when recognition is low-confidence or fragmented */}
+      {lowConfidenceHint && (
+        <div className="absolute top-full mt-3 right-0 sm:right-auto sm:left-1/2 sm:-translate-x-1/2 w-72 sm:w-max max-w-[90vw] px-3 py-1.5 bg-amber-50/95 border border-amber-200/90 text-amber-900 text-xs rounded-xl shadow-md z-30 flex items-center justify-between gap-2 animate-fadeIn backdrop-blur-xs">
+          <div className="flex items-center gap-1.5">
+            <span className="text-amber-500 font-medium">💡</span>
+            <span className="font-normal">{lowConfidenceHint}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setLowConfidenceHint(null)}
+            className="text-amber-500 hover:text-amber-800 text-sm font-bold leading-none shrink-0 px-1 ml-1"
+            title="Dismiss hint"
+          >
+            &times;
+          </button>
+        </div>
+      )}
+
+      {/* Inline Microphone Error Popover */}
       {errorMessage && (
         <div className="absolute bottom-full mb-2 right-0 sm:left-1/2 sm:-translate-x-1/2 w-64 p-2.5 bg-rose-600 text-white text-xs rounded-xl shadow-lg border border-rose-500 z-30 flex items-start justify-between gap-2 animate-fadeIn">
           <div className="flex items-start gap-1.5">
@@ -163,7 +226,7 @@ export default function VoiceButton({
         type="button"
         onClick={handleClick}
         disabled={disabled}
-        title={isRecording ? 'Click to stop listening' : 'Click to speak question'}
+        title={isRecording ? 'Click to stop listening' : 'Click to speak question (English or Thanglish)'}
         className={`relative w-10 h-10 min-w-[40px] min-h-[40px] sm:w-11 sm:h-11 sm:min-w-[44px] sm:min-h-[44px] rounded-full border transition-all duration-200 shrink-0 flex items-center justify-center ${
           isRecording
             ? 'bg-rose-500 hover:bg-rose-600 text-white border-rose-400 ring-4 ring-rose-200 animate-pulse'
