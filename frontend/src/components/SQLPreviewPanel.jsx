@@ -8,7 +8,45 @@ export default function SQLPreviewPanel({ queryData = {}, onViewSQL }) {
     query_type = 'select',
     needs_clarification = false,
     clarification_question = '',
+    data_available = true,
+    unavailable_message = '',
   } = queryData;
+
+  // If data is unavailable in database schema, render calm informational message
+  if (data_available === false) {
+    const unavailText =
+      unavailable_message ||
+      explanation ||
+      'This information is not tracked in the connected database schema.';
+
+    return (
+      <motion.div
+        initial={{ opacity: 0, y: 6 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.2 }}
+        className="w-full my-2 bg-gradient-to-br from-sky-50/95 via-blue-50/70 to-slate-50/90 border border-sky-200/80 rounded-2xl p-3.5 sm:p-4 shadow-2xs text-slate-800 backdrop-blur-xs"
+      >
+        <div className="flex items-center justify-between gap-2 mb-2 pb-2 border-b border-sky-200/50">
+          <div className="flex items-center gap-2 min-w-0">
+            <span className="w-5 h-5 rounded-full bg-sky-200/80 text-sky-800 flex items-center justify-center text-xs font-bold shrink-0">
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+            </span>
+            <span className="font-semibold text-xs text-sky-950 uppercase tracking-wider">
+              Information
+            </span>
+          </div>
+          <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-sky-100 text-sky-800 border border-sky-200 shrink-0">
+            Data Unavailable in Schema
+          </span>
+        </div>
+        <p className="text-xs sm:text-sm text-slate-700 leading-relaxed font-normal">
+          {unavailText}
+        </p>
+      </motion.div>
+    );
+  }
 
   // If clarification is required, render the clarification box
   if (needs_clarification) {

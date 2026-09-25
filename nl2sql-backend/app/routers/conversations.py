@@ -41,6 +41,10 @@ class MessageDetail(BaseModel):
     result: List[Any] = []
     chart_type: str = "none"
     timestamp: str
+    query_type: Optional[str] = "select"
+    data_available: bool = True
+    unavailable_message: Optional[str] = None
+    corrected_terms: List[Dict[str, str]] = []
 
 
 class ConversationMessagesResponse(BaseModel):
@@ -128,8 +132,9 @@ def get_conversation_messages(
             except Exception:
                 parsed_result = []
 
+        is_unavailable = r.query_type == "unavailable" or (r.generated_sql and r.generated_sql.startswith("-- Data unavailable"))
         is_clarif = r.generated_sql and r.generated_sql.startswith("-- Needs clarification:")
-        sql_val = None if is_clarif else r.generated_sql
+        sql_val = None if (is_clarif or is_unavailable) else r.generated_sql
         explanation_val = r.explanation
         if is_clarif and not explanation_val:
             explanation_val = r.generated_sql.replace("-- Needs clarification: ", "")
@@ -142,6 +147,10 @@ def get_conversation_messages(
                 result=parsed_result,
                 chart_type=r.chart_type or "none",
                 timestamp=r.created_at.strftime("%Y-%m-%d %H:%M:%S") if r.created_at else "",
+                query_type=r.query_type or ("unavailable" if is_unavailable else ("clarification" if is_clarif else "select")),
+                data_available=not is_unavailable,
+                unavailable_message=explanation_val if is_unavailable else None,
+                corrected_terms=[],
             )
         )
 

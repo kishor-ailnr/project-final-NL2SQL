@@ -156,7 +156,8 @@ export default function ChatWindow({ session, onDisconnect }) {
         });
 
         // Assistant query response message
-        const isClarif = !m.sql && m.explanation;
+        const isUnavailable = m.data_available === false || m.query_type === 'unavailable';
+        const isClarif = !isUnavailable && ((!m.sql && m.explanation) || m.query_type === 'clarification');
         formatted.push({
           id: `asst-${convId}-${idx}`,
           role: 'assistant',
@@ -169,6 +170,9 @@ export default function ChatWindow({ session, onDisconnect }) {
             confidence: isClarif ? 0.3 : 1.0,
             needs_clarification: isClarif,
             clarification_question: isClarif ? m.explanation : null,
+            data_available: !isUnavailable,
+            unavailable_message: isUnavailable ? (m.unavailable_message || m.explanation) : null,
+            corrected_terms: m.corrected_terms || [],
           },
           timestamp: m.timestamp,
         });
@@ -249,12 +253,19 @@ export default function ChatWindow({ session, onDisconnect }) {
         language: 'auto',
       });
 
-      // Update matching user message with interpreted_text if returned
-      if (queryResponse?.interpreted_text) {
+      // Update matching user message with interpreted_text and corrected_terms if returned
+      if (
+        queryResponse?.interpreted_text ||
+        (queryResponse?.corrected_terms && queryResponse.corrected_terms.length > 0)
+      ) {
         setMessages((prev) =>
           prev.map((msg) =>
             msg.id === userMsgId
-              ? { ...msg, interpreted_text: queryResponse.interpreted_text }
+              ? {
+                  ...msg,
+                  interpreted_text: queryResponse.interpreted_text || msg.interpreted_text,
+                  corrected_terms: queryResponse.corrected_terms || [],
+                }
               : msg
           )
         );
@@ -489,6 +500,7 @@ export default function ChatWindow({ session, onDisconnect }) {
                   content={msg.content}
                   rawContent={msg.raw_content || msg.content}
                   interpretedText={msg.interpreted_text}
+                  correctedTerms={msg.corrected_terms}
                   timestamp={msg.timestamp}
                 />
               );
@@ -496,37 +508,32 @@ export default function ChatWindow({ session, onDisconnect }) {
 
             if (msg.queryData) {
               const isWrite = msg.queryData.query_type === 'write';
+              const isUnavailable = msg.queryData.data_available === false;
+              const isClarif = msg.queryData.needs_clarification;
+
               return (
-                <motion.div
+                <MessageBubble
                   key={msg.id}
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.2 }}
-                  className="flex w-full my-2 sm:my-3 justify-start"
+                  role="assistant"
+                  queryData={msg.queryData}
+                  content={msg.queryData.explanation || msg.queryData.unavailable_message}
+                  dataAvailable={msg.queryData.data_available}
+                  unavailableMessage={msg.queryData.unavailable_message}
+                  needsClarification={isClarif}
+                  clarificationQuestion={msg.queryData.clarification_question}
+                  confidence={msg.queryData.confidence}
+                  sql={msg.queryData.sql}
+                  onViewSQL={handleOpenSQL}
+                  timestamp={msg.timestamp}
                 >
-                  <div className="w-full max-w-full sm:max-w-[96%] md:max-w-[92%] flex flex-col items-start">
-                    
-                    {/* Explanation Card */}
-                    <SQLPreviewPanel
-                      queryData={msg.queryData}
-                      onViewSQL={handleOpenSQL}
+                  {/* Table / Chart Result Display: only when data is available and not clarification / write */}
+                  {!isClarif && !isWrite && !isUnavailable && (
+                    <ChartPanel
+                      result={msg.queryData.result}
+                      chart_type={msg.queryData.chart_type}
                     />
-
-                    {/* Table / Chart Result Display */}
-                    {!msg.queryData.needs_clarification && !isWrite && (
-                      <ChartPanel
-                        result={msg.queryData.result}
-                        chart_type={msg.queryData.chart_type}
-                      />
-                    )}
-
-                    {msg.timestamp && (
-                      <span className="text-[10px] text-slate-400 mt-1 px-1">
-                        {msg.timestamp}
-                      </span>
-                    )}
-                  </div>
-                </motion.div>
+                  )}
+                </MessageBubble>
               );
             }
 

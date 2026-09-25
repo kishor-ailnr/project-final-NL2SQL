@@ -1,3 +1,4 @@
+import difflib
 import json
 import re
 import warnings
@@ -245,15 +246,49 @@ Instructions:
    - The question could reasonably map to more than one table or column and the correct one cannot be inferred from the schema or sample values.
    Otherwise, if the question has clear criteria or explicit filtering (for example: "list all patients older than 40", "40 வயதுக்கு மேற்பட்ட நோயாளிகளை காட்டு", or "40 vayasuku mela irukra patients ellam kaatu"), set "needs_clarification" to false.
 
-4. Output Structure Rules based on "needs_clarification":
-   - If "needs_clarification" is true:
+4. Data Availability Assessment:
+   - Check if the question asks for data, metrics, entities, or concepts that do not exist or cannot be derived from the database schema provided above (e.g. asking for stock prices, weather, patient insurance policies, or credit card numbers when no such tables or columns exist).
+   - If the requested data is NOT tracked in the schema:
+     - Set "data_available": false
+     - Set "unavailable_message": a calm, polite message explaining what information is not tracked in the connected database schema (e.g. "This database schema does not track patient insurance details or policies.").
+     - Set "sql": null
+     - Set "explanation": null
+     - Set "needs_clarification": false
+     - Set "confidence": 0.85
+   - If the requested data IS tracked in the schema:
+     - Set "data_available": true
+     - Set "unavailable_message": null
+
+5. Corrected Terms Tracking:
+   - If you corrected any misspelled or phonetically misheard words between the user's input and "interpreted_text", provide them in "corrected_terms" as a list of {"original": "misheard_word", "corrected": "fixed_word"}.
+   - Example: [{"original": "pashents", "corrected": "patients"}, {"original": "fourty", "corrected": "forty"}]
+   - If no words were corrected, return [].
+
+6. Output Structure Rules based on "needs_clarification" and "data_available":
+   - If "data_available" is false:
+     - "data_available": false
+     - "unavailable_message": a calm informational message
+     - "corrected_terms": [...]
+     - "needs_clarification": false
+     - "clarification_question": null
+     - "interpreted_text": the corrected/cleaned input question
+     - "sql": null
+     - "explanation": null
+     - "confidence": 0.85
+   - Else if "needs_clarification" is true:
+     - "data_available": true
+     - "unavailable_message": null
+     - "corrected_terms": [...]
      - "needs_clarification": true
      - "clarification_question": a short, specific, polite question asking the user to clarify the ambiguity (in the required output language).
      - "interpreted_text": the corrected/cleaned version of the input question.
      - "sql": null
      - "explanation": null
      - "confidence": a float below 0.5 (e.g. 0.2 or 0.3)
-   - If "needs_clarification" is false:
+   - Else:
+     - "data_available": true
+     - "unavailable_message": null
+     - "corrected_terms": [...]
      - "needs_clarification": false
      - "clarification_question": null
      - "interpreted_text": the corrected/cleaned version of the input question.
@@ -273,6 +308,9 @@ Self-Check:
 CRITICAL: Return ONLY a single valid JSON object. Do not include markdown code fences (```json or ```), backticks, or any introductory or concluding text.
 Format:
 {{
+  "data_available": true,
+  "unavailable_message": null,
+  "corrected_terms": [],
   "needs_clarification": false,
   "clarification_question": null,
   "interpreted_text": "the corrected/cleaned version of the input",
@@ -320,10 +358,11 @@ Database Schema:
 {schema_str}
 
 Instructions:
-1. Determine if the question needs clarification (e.g. ranking word without metric and limit, or vague terms like 'important' without criteria).
-2. Fix speech-to-text mistakes in interpreted_text.
-3. If needs_clarification is true, set sql to null, explanation to null, confidence < 0.5, and provide a short clarification_question.
-4. If needs_clarification is false, generate valid SQLite in sql, explanation, confidence >= 0.5, and clarification_question to null.
+1. Determine if the requested data exists in the schema. If absent, set "data_available": false, provide "unavailable_message", set sql to null.
+2. Determine if the question needs clarification (e.g. ranking word without metric and limit, or vague terms like 'important' without criteria).
+3. Fix speech-to-text mistakes in interpreted_text and list {"original", "corrected"} pairs in corrected_terms.
+4. If needs_clarification is true, set sql to null, explanation to null, confidence < 0.5, and provide a short clarification_question.
+5. If valid and available, generate valid SQLite in sql, explanation, confidence >= 0.5.
 
 User Question to Answer:
 "{nl_question}"
@@ -336,6 +375,9 @@ Self-Check:
 
 Output ONLY raw valid JSON without markdown formatting or backticks:
 {{
+  "data_available": true or false,
+  "unavailable_message": "..." or null,
+  "corrected_terms": [],
   "needs_clarification": true or false,
   "clarification_question": "..." or null,
   "interpreted_text": "corrected sentence",
@@ -370,6 +412,23 @@ Output ONLY raw valid JSON without markdown formatting or backticks:
 
 
 
+def _extract_word_corrections(original: str, corrected: str) -> list:
+    """Extract individual {original, corrected} word pairs between input and interpreted text."""
+    if not original or not corrected:
+        return []
+    orig_words = re.findall(r"\w+|[^\w\s]", original)
+    corr_words = re.findall(r"\w+|[^\w\s]", corrected)
+    matcher = difflib.SequenceMatcher(None, [w.lower() for w in orig_words], [w.lower() for w in corr_words])
+    pairs = []
+    for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+        if tag == "replace":
+            orig_chunk = " ".join(orig_words[i1:i2]).strip()
+            corr_chunk = " ".join(corr_words[j1:j2]).strip()
+            if orig_chunk.lower() != corr_chunk.lower():
+                pairs.append({"original": orig_chunk, "corrected": corr_chunk})
+    return pairs
+
+
 def _validate_result(data: Any, nl_question: str = "") -> None:
     """Ensure result dictionary contains required fields with expected types."""
     if not isinstance(data, dict):
@@ -381,6 +440,45 @@ def _validate_result(data: Any, nl_question: str = "") -> None:
         data["interpreted_text"] = nl_question
     else:
         data["interpreted_text"] = interpreted.strip()
+
+    # Normalize data_available & unavailable_message
+    data_available = bool(data.get("data_available", True))
+    data["data_available"] = data_available
+    if not data_available:
+        unavail_msg = data.get("unavailable_message")
+        if not unavail_msg or not isinstance(unavail_msg, str) or not unavail_msg.strip():
+            data["unavailable_message"] = "This information is not tracked in the connected database schema."
+        else:
+            data["unavailable_message"] = unavail_msg.strip()
+        data["sql"] = None
+        data["explanation"] = None
+        data["needs_clarification"] = False
+        data["clarification_question"] = None
+        try:
+            conf = float(data.get("confidence", 0.85))
+            data["confidence"] = conf
+        except (ValueError, TypeError):
+            data["confidence"] = 0.85
+    else:
+        data["unavailable_message"] = None
+
+    # Normalize corrected_terms
+    corrected_terms = data.get("corrected_terms")
+    valid_pairs = []
+    if isinstance(corrected_terms, list):
+        for item in corrected_terms:
+            if isinstance(item, dict) and "original" in item and "corrected" in item:
+                orig = str(item["original"]).strip()
+                corr = str(item["corrected"]).strip()
+                if orig and corr and orig.lower() != corr.lower():
+                    valid_pairs.append({"original": orig, "corrected": corr})
+    # If model did not output pairs but input was corrected, derive automatically
+    if not valid_pairs and data.get("interpreted_text") and nl_question:
+        valid_pairs = _extract_word_corrections(nl_question, data["interpreted_text"])
+    data["corrected_terms"] = valid_pairs
+
+    if not data_available:
+        return
 
     # Normalize needs_clarification
     needs_clarif = bool(data.get("needs_clarification", False))
@@ -403,7 +501,7 @@ def _validate_result(data: Any, nl_question: str = "") -> None:
         data["clarification_question"] = None
         sql = data.get("sql")
         if not sql or not isinstance(sql, str) or not sql.strip():
-            raise ValueError("JSON must include non-empty 'sql' string when needs_clarification is false")
+            raise ValueError("JSON must include non-empty 'sql' string when needs_clarification is false and data is available")
         data["sql"] = sql.strip()
         explanation = data.get("explanation")
         data["explanation"] = explanation.strip() if isinstance(explanation, str) else ""

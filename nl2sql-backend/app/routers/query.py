@@ -99,6 +99,9 @@ class QueryResponse(BaseModel):
     detected_language: Optional[str] = None
     self_corrected: bool = False
     correction_attempts: int = 0
+    data_available: bool = True
+    unavailable_message: Optional[str] = None
+    corrected_terms: List[Dict[str, str]] = []
 
 
 
@@ -210,6 +213,49 @@ def handle_query(
 
     interpreted_text = gen_data.get("interpreted_text") or payload.text
     detected_lang = gen_data.get("detected_language")
+    data_available = bool(gen_data.get("data_available", True))
+    unavailable_msg = gen_data.get("unavailable_message")
+    corrected_terms = gen_data.get("corrected_terms") or []
+
+    # Handle data unavailable in connected database schema
+    if not data_available:
+        msg_text = unavailable_msg or "This information is not tracked in the connected database schema."
+        query_record = QueryHistoryModel(
+            session_id=payload.session_id,
+            conversation_id=conv.id,
+            nl_query=payload.text,
+            generated_sql="-- Data unavailable in schema",
+            explanation=msg_text,
+            result_json="[]",
+            chart_type="none",
+            confidence=0.85,
+            query_type="unavailable",
+            self_corrected=0,
+            correction_attempts=0,
+            created_at=datetime.utcnow(),
+        )
+        db.add(query_record)
+        db.commit()
+        db.refresh(query_record)
+
+        return QueryResponse(
+            query_id=str(query_record.id),
+            sql=None,
+            explanation=msg_text,
+            confidence=0.85,
+            needs_clarification=False,
+            clarification_question=None,
+            query_type="unavailable",
+            result=[],
+            chart_type="none",
+            interpreted_text=interpreted_text,
+            detected_language=detected_lang,
+            self_corrected=False,
+            correction_attempts=0,
+            data_available=False,
+            unavailable_message=msg_text,
+            corrected_terms=corrected_terms,
+        )
 
     # Handle clarification needed before validation or execution
     if gen_data.get("needs_clarification", False):
@@ -244,7 +290,11 @@ def handle_query(
             chart_type="none",
             interpreted_text=interpreted_text,
             detected_language=detected_lang,
+            data_available=True,
+            unavailable_message=None,
+            corrected_terms=corrected_terms,
         )
+
 
     current_sql = gen_data.get("sql", "")
     current_explanation = gen_data.get("explanation", "")
@@ -394,6 +444,9 @@ def handle_query(
             detected_language=detected_lang,
             self_corrected=False,
             correction_attempts=attempt,
+            data_available=True,
+            unavailable_message=None,
+            corrected_terms=corrected_terms,
         )
 
     # Success (either on first attempt or after self-correction)
@@ -430,5 +483,8 @@ def handle_query(
         detected_language=detected_lang,
         self_corrected=self_corrected,
         correction_attempts=attempt,
+        data_available=True,
+        unavailable_message=None,
+        corrected_terms=corrected_terms,
     )
 

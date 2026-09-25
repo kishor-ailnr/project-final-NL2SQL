@@ -431,12 +431,17 @@ def build_pdf(output_path: str):
 
     story.append(render_comp_card(
         "frontend/src/components/MessageBubble.jsx",
-        "Renders individual chat messages in the conversation stream with Framer Motion slide-up animations. Distinctly styles user prompts "
-        "(teal gradients, 85-90% responsive width on mobile) and assistant responses (white cards with subtle borders), displaying timestamps and subtle 'Heard as: ...' transcript captions.",
+        "Renders individual chat messages in the conversation stream with Framer Motion slide-up animations. Handles 4 primary states: "
+        "(1) User message with optional 'Considered [original] as [corrected]' chips highlighted in soft yellow (bg-yellow-100), "
+        "(2) Data unavailable informational bubble in calm neutral sky/blue tone (data_available: false, omitting SQL trigger & chart), "
+        "(3) Clarification required card in warm amber prompting for specific criteria, and "
+        "(4) Normal assistant analysis card with confidence badge, '</> View SQL' drawer trigger, and embedded chart/table.",
         [
-            ("isMeaningfullyDifferent check", "Compares raw user input against Gemini's interpreted_text to detect voice recognition fixes."),
-            ("motion.div wrapper", "Animates message bubble on mount from y: 10, opacity: 0 to y: 0, opacity: 1 over 200ms."),
-            ("Responsive Bubble Widths", "User messages: max-w-[88%] on mobile to [72%] on desktop; Assistant messages: max-w-[96%] on mobile."),
+            ("dataAvailable === false handling", "Renders calm, neutral informational bubble in soft sky tone; suppresses SQL drawer trigger and empty charts."),
+            ("correctedTerms chips", "Displays individual word correction chips above user bubbles with soft yellow highlight (bg-yellow-100) on corrected terms."),
+            ("needsClarification check", "Displays ambiguous query warning card in warm amber without generating incomplete SQL."),
+            ("isMeaningfullyDifferent check", "Fallback comparison between raw user input and interpreted_text when structured word pairs are absent."),
+            ("motion.div wrapper", "Animates message bubbles on mount from y: 10, opacity: 0 to y: 0, opacity: 1 over 200ms."),
         ]
     ))
 
@@ -630,6 +635,13 @@ def build_pdf(output_path: str):
             "desc": "Redesigned application shell occupying 100vw and 100vh/100dvh without outer card margins. Features an edge-to-edge navbar, a compact responsive database toolbar, an independently scrolling message stream, a fixed bottom composer with multiline auto-resizing textarea, 44px mobile touch targets, and safe-area padding.",
             "impl": "frontend/src/App.jsx -> 100vw/100dvh shell & edge-to-edge header<br/>frontend/src/components/ChatWindow.jsx -> compact toolbar, scroll stream & sticky composer<br/>frontend/src/index.css -> global box-sizing & 100% root dimensions<br/>frontend/src/components/VoiceButton.jsx -> min-w-[44px] min-h-[44px] touch target",
             "failure": "If viewport dimensions dynamically change (such as virtual keyboard activation or orientation changes on mobile), 100dvh and flex constraints smoothly adapt the message stream without clipping or breaking page width."
+        },
+        {
+            "id": "11",
+            "name": "Data Availability & Corrected Terms Chips (Calm Informational Bubbles & Soft Yellow Word Highlights)",
+            "desc": "When data_available is false (the requested entity/metric is not tracked in the schema), shows a calm, neutral informational bubble in soft sky/blue tones displaying unavailable_message, omitting the SQL drawer trigger and suppressing empty charts. When corrected_terms is non-empty, displays small glassmorphic chips above the user's bubble ('Considered [original] as [corrected]') with the corrected word highlighted in soft yellow (bg-yellow-100), ensuring transparency for voice and typo corrections.",
+            "impl": "frontend/src/components/MessageBubble.jsx -> resolvedDataAvailable calm card & correctedTerms chips<br/>frontend/src/components/SQLPreviewPanel.jsx -> fallback calm informational render<br/>frontend/src/components/ChatWindow.jsx -> user corrected_terms update & ChartPanel suppression",
+            "failure": "If corrected_terms is omitted by the AI model, difflib word-level difference extraction in the backend automatically aligns raw input against interpreted_text to populate the pairs. If data_available is undefined, it defaults safely to true, never hiding valid queries."
         },
     ]
 
