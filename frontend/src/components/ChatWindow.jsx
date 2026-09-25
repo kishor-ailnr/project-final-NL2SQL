@@ -7,24 +7,36 @@ import ChartPanel from './ChartPanel';
 import ConfirmModal from './ConfirmModal';
 import HistorySidebar from './HistorySidebar';
 import SQLDrawer from './SQLDrawer';
-import { sendQuery, confirmWrite, sendVoice } from '../api/client';
+import {
+  sendQuery,
+  confirmWrite,
+  createConversation,
+  getConversations,
+  getConversationMessages,
+} from '../api/client';
+
+const INITIAL_WELCOME = {
+  id: 'init-1',
+  role: 'assistant',
+  content: 'Hello! I am your NL-to-SQL Assistant. Ask me a question about your database in natural language (e.g., "Show all patients older than 40" or "List top 5 products by revenue").',
+  timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+};
 
 export default function ChatWindow({ session, onDisconnect }) {
   const sessionId = session?.session_id || 'N/A';
   const tables = session?.tables || [];
 
-  const [messages, setMessages] = useState([
-    {
-      id: 'init-1',
-      role: 'assistant',
-      content: 'Hello! I am your NL-to-SQL Assistant. Ask me a question about your database in natural language (e.g., "Show all patients older than 40" or "List top 5 products by revenue").',
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-    },
-  ]);
+  const [messages, setMessages] = useState([INITIAL_WELCOME]);
   const [inputValue, setInputValue] = useState('');
   const [isPending, setIsPending] = useState(false);
   const [showTables, setShowTables] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+
+  // Multi-conversation state
+  const [conversations, setConversations] = useState([]);
+  const [activeConversationId, setActiveConversationId] = useState(null);
+  const [conversationsLoading, setConversationsLoading] = useState(false);
+  const [conversationsError, setConversationsError] = useState(null);
 
   // SQL Drawer state (right-side slide-in)
   const [activeSQLQuery, setActiveSQLQuery] = useState(null);
@@ -44,6 +56,119 @@ export default function ChatWindow({ session, onDisconnect }) {
     scrollToBottom();
   }, [messages, isPending]);
 
+  // Load conversations on session mount
+  const fetchConversations = async (autoSelect = false) => {
+    if (!sessionId || sessionId === 'N/A') return;
+    setConversationsLoading(true);
+    setConversationsError(null);
+    try {
+      const data = await getConversations(sessionId);
+      const convList = data?.conversations || [];
+      setConversations(convList);
+
+      if (autoSelect) {
+        if (convList.length > 0) {
+          handleSelectConversation(convList[0].conversation_id);
+        } else {
+          handleNewChat();
+        }
+      }
+    } catch (err) {
+      console.warn('Failed to fetch conversations:', err.message);
+      setConversationsError('Could not load chat history.');
+    } finally {
+      setConversationsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchConversations(true);
+  }, [sessionId]);
+
+  // Handler for creating a fresh conversation
+  const handleNewChat = async () => {
+    if (!sessionId || sessionId === 'N/A') return;
+    try {
+      const res = await createConversation(sessionId);
+      if (res?.conversation_id) {
+        setActiveConversationId(res.conversation_id);
+        setMessages([
+          {
+            ...INITIAL_WELCOME,
+            id: `init-${Date.now()}`,
+            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          },
+        ]);
+        setConversations((prev) => [
+          {
+            conversation_id: res.conversation_id,
+            title: 'New Chat',
+            created_at: res.created_at,
+          },
+          ...prev.filter((c) => c.conversation_id !== res.conversation_id),
+        ]);
+      }
+    } catch (err) {
+      console.warn('Failed to create new conversation:', err.message);
+    }
+  };
+
+  // Handler for switching to an existing conversation
+  const handleSelectConversation = async (convId) => {
+    if (!convId) return;
+    setActiveConversationId(convId);
+    try {
+      const data = await getConversationMessages(convId);
+      const msgList = data?.messages || [];
+
+      if (msgList.length === 0) {
+        setMessages([
+          {
+            ...INITIAL_WELCOME,
+            id: `init-${Date.now()}`,
+            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          },
+        ]);
+        return;
+      }
+
+      const formatted = [];
+      msgList.forEach((m, idx) => {
+        // User question message
+        formatted.push({
+          id: `user-${convId}-${idx}`,
+          role: 'user',
+          content: m.nl_query,
+          raw_content: m.nl_query,
+          interpreted_text: null,
+          timestamp: m.timestamp,
+        });
+
+        // Assistant query response message
+        const isClarif = !m.sql && m.explanation;
+        formatted.push({
+          id: `asst-${convId}-${idx}`,
+          role: 'assistant',
+          queryData: {
+            query_id: `msg-${convId}-${idx}`,
+            sql: m.sql,
+            explanation: m.explanation,
+            result: m.result || [],
+            chart_type: m.chart_type || 'none',
+            confidence: isClarif ? 0.3 : 1.0,
+            needs_clarification: isClarif,
+            clarification_question: isClarif ? m.explanation : null,
+          },
+          timestamp: m.timestamp,
+        });
+      });
+
+      setMessages(formatted);
+    } catch (err) {
+      console.warn('Failed to load conversation messages:', err.message);
+    }
+  };
+
   const handleOpenSQL = (queryData) => {
     setActiveSQLQuery(queryData);
     setIsSQLDrawerOpen(true);
@@ -53,6 +178,17 @@ export default function ChatWindow({ session, onDisconnect }) {
     if (e) e.preventDefault();
     const text = inputValue.trim();
     if (!text || isPending) return;
+
+    let targetConvId = activeConversationId;
+    if (!targetConvId) {
+      try {
+        const newConv = await createConversation(sessionId);
+        targetConvId = newConv.conversation_id;
+        setActiveConversationId(targetConvId);
+      } catch (convErr) {
+        console.warn('Failed to initialize conversation before send:', convErr);
+      }
+    }
 
     const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     const userMsgId = `user-${Date.now()}`;
@@ -72,6 +208,7 @@ export default function ChatWindow({ session, onDisconnect }) {
     try {
       const queryResponse = await sendQuery({
         session_id: sessionId,
+        conversation_id: targetConvId,
         text,
         language: 'auto',
       });
@@ -100,6 +237,9 @@ export default function ChatWindow({ session, onDisconnect }) {
         setPendingWriteQuery(queryResponse);
         setIsModalOpen(true);
       }
+
+      // Refresh conversations list to show updated title
+      fetchConversations(false);
     } catch (err) {
       console.warn('sendQuery API error:', err.message);
       const errorMessage = {
@@ -186,10 +326,15 @@ export default function ChatWindow({ session, onDisconnect }) {
       
       {/* History Drawer Component (Left Slide-in) */}
       <HistorySidebar
-        sessionId={sessionId}
         isOpen={isSidebarOpen}
         onClose={() => setIsSidebarOpen(false)}
-        onSelectHistory={(queryText) => setInputValue(queryText)}
+        conversations={conversations}
+        activeConversationId={activeConversationId}
+        loading={conversationsLoading}
+        error={conversationsError}
+        onRefresh={() => fetchConversations(false)}
+        onNewChat={handleNewChat}
+        onSelectConversation={handleSelectConversation}
       />
 
       {/* SQL Drawer Component (Right Slide-in) */}
@@ -212,12 +357,30 @@ export default function ChatWindow({ session, onDisconnect }) {
                 type="button"
                 onClick={() => setIsSidebarOpen(!isSidebarOpen)}
                 className="px-2.5 py-1.5 rounded-xl bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 text-xs font-semibold flex items-center gap-1.5 shadow-2xs transition-all hover:border-teal-300"
-                title="Toggle Query History"
+                title="Toggle Chat History"
               >
                 <svg className="w-4 h-4 text-teal-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
                 </svg>
-                <span className="hidden sm:inline">History</span>
+                <span className="hidden sm:inline">Chats</span>
+                {conversations.length > 0 && (
+                  <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-slate-100 text-slate-600 font-mono">
+                    {conversations.length}
+                  </span>
+                )}
+              </button>
+
+              {/* + New Chat Quick Button */}
+              <button
+                type="button"
+                onClick={handleNewChat}
+                className="px-2.5 py-1.5 rounded-xl bg-teal-50 hover:bg-teal-100 text-teal-700 border border-teal-200/80 text-xs font-semibold flex items-center gap-1.5 shadow-2xs transition-all hover:border-teal-300 active:scale-95"
+                title="Start a new chat"
+              >
+                <svg className="w-3.5 h-3.5 text-teal-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 4v16m8-8H4" />
+                </svg>
+                <span>New Chat</span>
               </button>
 
               {/* Status Badge */}

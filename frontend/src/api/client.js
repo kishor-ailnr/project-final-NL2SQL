@@ -40,16 +40,48 @@ export async function connectDB({ db_type, connection_string, demo_name }) {
   }
 }
 
-export async function sendQuery({ session_id, text, language = 'auto' }) {
+export async function sendQuery({ session_id, conversation_id, text, language = 'auto' }) {
   try {
     const response = await api.post('/api/query', {
       session_id,
+      conversation_id,
       text,
       language,
     });
-    return response.data; // { query_id, sql, explanation, confidence, needs_clarification, clarification_question, query_type, result, chart_type }
+    return response.data; // { query_id, sql, explanation, confidence, needs_clarification, clarification_question, query_type, result, chart_type, interpreted_text }
   } catch (err) {
     throw formatError(err, 'Failed to process query.');
+  }
+}
+
+export async function createConversation(session_id) {
+  try {
+    const response = await api.post('/api/conversations/new', {
+      session_id,
+    });
+    return response.data; // { conversation_id, created_at }
+  } catch (err) {
+    throw formatError(err, 'Failed to create new conversation.');
+  }
+}
+
+export async function getConversations(session_id) {
+  try {
+    const response = await api.get('/api/conversations', {
+      params: { session_id },
+    });
+    return response.data; // { conversations: [{ conversation_id, title, created_at }] }
+  } catch (err) {
+    throw formatError(err, 'Failed to fetch conversations.');
+  }
+}
+
+export async function getConversationMessages(conversation_id) {
+  try {
+    const response = await api.get(`/api/conversations/${conversation_id}/messages`);
+    return response.data; // { messages: [{ nl_query, sql, explanation, result, chart_type, timestamp }] }
+  } catch (err) {
+    throw formatError(err, 'Failed to load conversation messages.');
   }
 }
 

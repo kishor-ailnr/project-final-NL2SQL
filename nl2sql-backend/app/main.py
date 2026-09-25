@@ -4,7 +4,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from app.models.meta_db import init_db
-from app.routers import connect_db, query
+from app.routers import connect_db, query, conversations
 
 logger = logging.getLogger(__name__)
 
@@ -53,9 +53,10 @@ async def global_exception_handler(request: Request, exc: Exception):
     )
 
 
-# Register Phase 2 Routers
+# Register Routers
 app.include_router(connect_db.router, prefix="/api", tags=["Database Connection"])
 app.include_router(query.router, prefix="/api", tags=["Query"])
+app.include_router(conversations.router, prefix="/api", tags=["Conversations"])
 
 
 @app.get("/health")

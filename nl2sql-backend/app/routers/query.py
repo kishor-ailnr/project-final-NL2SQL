@@ -1,13 +1,16 @@
+import json
 import logging
 import time
+import uuid
 from collections import defaultdict
 from datetime import datetime
 from typing import List, Dict, Any, Optional, Union
+import google.generativeai as genai
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from app.models.meta_db import QueryHistoryModel, get_db_session
+from app.models.meta_db import ConversationModel, QueryHistoryModel, get_db_session
 from app.services.sql_generator import generate_sql
 from app.services.sql_validator import validate_sql
 from app.services.execution_engine import run_select
@@ -21,6 +24,29 @@ router = APIRouter()
 _QUERY_TIMESTAMPS: Dict[str, List[float]] = defaultdict(list)
 RATE_LIMIT_PER_MINUTE = 20
 WINDOW_SECONDS = 60.0
+
+
+def generate_conversation_title(question: str) -> str:
+    """Generate a short 3-5 word title summarizing the user question with fast fallback."""
+    def _fallback_title(text: str) -> str:
+        words = text.strip().split()
+        title = " ".join(words[:5]).capitalize()
+        return title[:40]
+
+    try:
+        model = genai.GenerativeModel("gemini-3.5-flash-lite")
+        prompt = (
+            f"Generate a short 3-5 word title summarizing this database question: \"{question}\".\n"
+            "Return ONLY the plain title text (no quotes, no markdown, max 5 words)."
+        )
+        res = model.generate_content(prompt, generation_config={"temperature": 0.2, "max_output_tokens": 20})
+        title = (res.text or "").strip().strip('"\'')
+        if title and len(title) <= 50:
+            return title
+    except Exception as e:
+        logger.warning("Gemini title generation failed (%s). Using fallback title.", e)
+
+    return _fallback_title(question)
 
 
 def check_rate_limit(session_id: str) -> None:
@@ -54,6 +80,7 @@ def reset_rate_limits() -> None:
 
 class QueryRequest(BaseModel):
     session_id: str = Field(..., description="ID of the active database session")
+    conversation_id: Optional[str] = Field(None, description="UUID of the active conversation")
     text: str = Field(..., description="Natural language user question")
     language: str = Field("auto", description="Language code, default 'auto'")
 
@@ -120,6 +147,39 @@ def handle_query(
             detail="Active session not found. Please connect to a database first.",
         )
 
+    # Ensure conversation exists; if omitted or not found, auto-create under this session
+    target_conv_id = payload.conversation_id
+    if target_conv_id:
+        conv = db.query(ConversationModel).filter(ConversationModel.id == target_conv_id).first()
+        if not conv:
+            conv = ConversationModel(
+                id=target_conv_id,
+                session_id=payload.session_id,
+                title="New Chat",
+                created_at=datetime.utcnow(),
+            )
+            db.add(conv)
+            db.commit()
+            db.refresh(conv)
+    else:
+        conv = ConversationModel(
+            id=str(uuid.uuid4()),
+            session_id=payload.session_id,
+            title="New Chat",
+            created_at=datetime.utcnow(),
+        )
+        db.add(conv)
+        db.commit()
+        db.refresh(conv)
+
+    # Auto-generate title from the first question if currently default "New Chat"
+    if conv.title in ("New Chat", "", None):
+        try:
+            conv.title = generate_conversation_title(payload.text)
+            db.commit()
+        except Exception as title_err:
+            logger.warning("Could not auto-generate conversation title: %s", title_err)
+
     # 1. Generate SQL using Gemini (with clarification detection)
     try:
         gen_data = generate_sql(payload.session_id, payload.text, language=payload.language)
@@ -153,8 +213,12 @@ def handle_query(
 
         query_record = QueryHistoryModel(
             session_id=payload.session_id,
+            conversation_id=conv.id,
             nl_query=payload.text,
             generated_sql="-- Needs clarification: " + clarification_q,
+            explanation=clarification_q,
+            result_json="[]",
+            chart_type="none",
             confidence=confidence,
             query_type="clarification",
             created_at=datetime.utcnow(),
@@ -186,8 +250,12 @@ def handle_query(
         friendly_message = validation.get("message", "Invalid SQL query.")
         query_record = QueryHistoryModel(
             session_id=payload.session_id,
+            conversation_id=conv.id,
             nl_query=payload.text,
             generated_sql=sql,
+            explanation=friendly_message,
+            result_json="[]",
+            chart_type="none",
             confidence=0.0,
             query_type="select",
             created_at=datetime.utcnow(),
@@ -215,8 +283,12 @@ def handle_query(
         friendly_message = f"Database query execution failed: {exec_result['error']}"
         query_record = QueryHistoryModel(
             session_id=payload.session_id,
+            conversation_id=conv.id,
             nl_query=payload.text,
             generated_sql=sql,
+            explanation=friendly_message,
+            result_json="[]",
+            chart_type="none",
             confidence=0.0,
             query_type="select",
             created_at=datetime.utcnow(),
@@ -241,8 +313,12 @@ def handle_query(
     # 4. Save successful query to query_history in meta_db
     query_record = QueryHistoryModel(
         session_id=payload.session_id,
+        conversation_id=conv.id,
         nl_query=payload.text,
         generated_sql=sql,
+        explanation=explanation,
+        result_json=json.dumps(exec_result) if exec_result else "[]",
+        chart_type="none",
         confidence=confidence,
         query_type="select",
         created_at=datetime.utcnow(),
