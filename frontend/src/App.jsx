@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import ConnectDBScreen from './components/ConnectDBScreen';
 import ChatWindow from './components/ChatWindow';
-import HelpSidebar from './components/HelpSidebar';
+import GuideDialog from './components/GuideDialog';
 import { getSessionStatus } from './api/client';
 
 export default function App() {
@@ -109,17 +109,19 @@ export default function App() {
               </span>
             )}
 
-            {/* Persistent Help / Guide Button */}
-            <button
-              onClick={() => setIsHelpOpen(true)}
-              className="p-1.5 sm:px-3 sm:py-1.5 rounded-xl bg-white hover:bg-teal-50/80 border border-slate-200/90 hover:border-teal-300 text-slate-700 hover:text-teal-800 transition-all text-xs font-semibold flex items-center gap-1.5 shadow-2xs group"
-              title="Open User Guide & Help"
-            >
-              <span className="w-5 h-5 rounded-full bg-slate-100 group-hover:bg-teal-600 text-slate-600 group-hover:text-white flex items-center justify-center font-bold text-xs transition-colors">
-                ?
-              </span>
-              <span className="hidden sm:inline">Guide</span>
-            </button>
+            {/* Persistent Lightswind UI Guide Dialog Trigger */}
+            <GuideDialog open={isHelpOpen} onOpenChange={setIsHelpOpen}>
+              <button
+                type="button"
+                className="p-1.5 sm:px-3 sm:py-1.5 rounded-xl bg-white hover:bg-teal-50/80 border border-slate-200/90 hover:border-teal-300 text-slate-700 hover:text-teal-800 transition-all text-xs font-semibold flex items-center gap-1.5 shadow-2xs group"
+                title="Open User Guide & Instructions"
+              >
+                <span className="w-5 h-5 rounded-full bg-slate-100 group-hover:bg-teal-600 text-slate-600 group-hover:text-white flex items-center justify-center font-bold text-xs transition-colors">
+                  ?
+                </span>
+                <span className="hidden sm:inline">Guide</span>
+              </button>
+            </GuideDialog>
           </div>
 
         </div>
@@ -141,12 +143,6 @@ export default function App() {
           <ChatWindow session={session} onDisconnect={handleDisconnect} />
         )}
       </main>
-
-      {/* Global Help / Orientation Drawer (Left Slide-in) */}
-      <HelpSidebar
-        isOpen={isHelpOpen}
-        onClose={() => setIsHelpOpen(false)}
-      />
 
     </div>
   );

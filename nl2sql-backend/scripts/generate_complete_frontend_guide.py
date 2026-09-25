@@ -537,6 +537,28 @@ def build_pdf(output_path: str):
         ]
     ))
 
+    story.append(render_comp_card(
+        "frontend/src/components/lightswind/dialog.tsx",
+        "Lightswind UI Dialog modal component. Features spring-based scale-in/scale-out transitions (stiffness: 400, damping: 25), "
+        "backdrop blur overlay, document body overflow scroll-locking, accessible close button, and modular subcomponents (DialogTrigger, "
+        "DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogClose).",
+        [
+            ("DialogContext", "React context managing controlled / uncontrolled open state across trigger, content, and close buttons."),
+            ("DialogContent portal", "Renders modal content through ReactDOM.createPortal directly to document.body with z-[9999]."),
+            ("Overflow locking effect", "Automatically sets document.body.style.overflow = 'hidden' when open and restores on unmount."),
+        ]
+    ))
+
+    story.append(render_comp_card(
+        "frontend/src/components/GuideDialog.jsx",
+        "Orientation dialog wrapper that binds Lightswind UI Dialog to the persistent top navbar '?' Guide button. "
+        "Presents the 6 core end-to-end workflow steps inside a glassmorphic modal with keyboard (Esc) and backdrop dismissal.",
+        [
+            ("GUIDE_STEPS catalog", "6 structured step cards explaining data connections, multilingual NLP, charts, SQL, and safety."),
+            ("DialogTrigger wrapper", "Wraps any child trigger button with asChild behavior to initiate modal presentation."),
+        ]
+    ))
+
     # ---------------------------------------------------------
     # SECTION 2: FEATURE → CODE IMPLEMENTATION MAP
     # ---------------------------------------------------------
@@ -574,10 +596,10 @@ def build_pdf(output_path: str):
         },
         {
             "id": "4",
-            "name": "Interactive Help Guide ('?' Navbar Trigger)",
-            "desc": "A persistent '?' Guide button in the top navbar opens a 6-step interactive visual orientation drawer detailing data connections, voice queries, charts, SQL viewing, and write safety.",
-            "impl": "frontend/src/App.jsx -> Guide button in header<br/>frontend/src/components/HelpSidebar.jsx -> 6-step visual guide<br/>frontend/src/components/HelpSidebar.jsx -> Escape & backdrop dismissal",
-            "failure": "The guide drawer is fully decoupled from chat state. Opening or closing it does not interrupt ongoing queries, reset active inputs, or affect connected database sessions."
+            "name": "Lightswind UI Dialog Guide ('?' Navbar Trigger)",
+            "desc": "A persistent '?' Guide button in the top navbar opens a Lightswind UI Dialog modal with spring scale-in animations (stiffness: 400, damping: 25), backdrop blur, and 6 visual instruction cards explaining workflows.",
+            "impl": "frontend/src/components/lightswind/dialog.tsx -> Dialog<br/>frontend/src/components/GuideDialog.jsx -> GuideDialog<br/>frontend/src/App.jsx -> Guide Dialog Trigger",
+            "failure": "If dialog portal mounting fails or document.body overflow locking is interrupted, Dialog clean-up hooks restore body overflow style automatically upon unmount. The trigger button is decoupled from ongoing queries."
         },
         {
             "id": "5",
