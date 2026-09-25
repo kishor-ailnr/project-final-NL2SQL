@@ -301,7 +301,7 @@ def build_pdf(output_path: str):
     toc_data = [
         [Paragraph("<b>Section</b>", table_header_style), Paragraph("<b>Title & Core Content</b>", table_header_style), Paragraph("<b>Coverage</b>", table_header_style)],
         [Paragraph("<b>Section 1</b>", table_cell_bold), Paragraph("File-by-File Technical Guide", table_cell_style), Paragraph("app/, models/, routers/, services/, scripts/, requirements.txt", table_cell_style)],
-        [Paragraph("<b>Section 2</b>", table_cell_bold), Paragraph("Feature → Code Implementation Map", table_cell_style), Paragraph("11 core features, functions, and 'what-if-fails' recovery analysis", table_cell_style)],
+        [Paragraph("<b>Section 2</b>", table_cell_bold), Paragraph("Feature → Code Implementation Map", table_cell_style), Paragraph("12 core features, functions, and 'what-if-fails' recovery analysis", table_cell_style)],
     ]
     toc_table = Table(toc_data, colWidths=[70, 260, 174])
     toc_table.setStyle(TableStyle([
@@ -466,6 +466,19 @@ def build_pdf(output_path: str):
     ))
 
     story.append(render_file_card(
+        "nl2sql-backend/app/services/rag_service.py",
+        "Schema-aware retrieval-augmented generation (RAG) engine. Generates dense semantic embeddings (using all-MiniLM-L6-v2) "
+        "from table names, column definitions, and sample values, indexing them into a high-performance FAISS vector index (IndexFlatIP). "
+        "Enables dynamic schema pruning for large uploaded CSV/SQL databases while preserving small schemas (<= 4 tables) with zero regression.",
+        [
+            ("build_schema_index(session_id, tables, ...)", "Builds normalized L2 embeddings and registers a FAISS IndexFlatIP cosine similarity index."),
+            ("retrieve_relevant_tables(session_id, query, top_k=4)", "Queries FAISS to return the top 3-4 most relevant tables (or all if <= 4 tables)."),
+            ("build_table_summary(table, cols, samples)", "Constructs rich semantic text representations combining names, types, and sample data."),
+            ("remove_schema_index(session_id)", "Evicts the FAISS index from in-memory cache upon session termination."),
+        ]
+    ))
+
+    story.append(render_file_card(
         "nl2sql-backend/app/services/sql_validator.py",
         "The safety gatekeeper. It parses generated SQL queries into an Abstract Syntax Tree (AST) using sqlglot to detect syntax errors, "
         "verify structural correctness, classify queries into 'select' vs 'write', and immediately block destructive DDL/DML (DROP, ALTER, TRUNCATE).",
@@ -494,6 +507,7 @@ def build_pdf(output_path: str):
         ("test_multilingual.py", "Tests SQL generation accuracy across English, Tamil script, and Thanglish (Latin-script Tamil)."),
         ("test_phase2.py / test_phase3.py", "Verifies database connection extraction and standalone SQL generator/validator pipeline."),
         ("test_phase5.py", "End-to-end security test suite covering write confirmation gating, audit log recording, and SQL injection blocking."),
+        ("test_rag.py", "Verifies schema-aware retrieval (RAG) regression on hospital demo and precision on a 12-table synthetic schema."),
         ("test_sample_values_and_naming.py", "Tests CSV table sanitization and sample value inclusion in database inspection."),
         ("test_security_audit.py", "Validates audit_log table insertions and query classification integrity."),
         ("test_voice_correction.py", "Verifies that phonetic and speech-to-text transcription errors are corrected in interpreted_text."),
@@ -501,7 +515,7 @@ def build_pdf(output_path: str):
     ]
     story.append(render_file_card(
         "nl2sql-backend/scripts/ (Automated Test Suites)",
-        "A suite of 12 standalone automation and verification scripts that validate all backend layers in isolation and end-to-end.",
+        "A suite of 13 standalone automation and verification scripts that validate all backend layers in isolation and end-to-end.",
         scripts_summary
     ))
 
@@ -610,6 +624,13 @@ def build_pdf(output_path: str):
             "desc": "Configures FastAPI CORSMiddleware to allow authorized cross-origin requests from local Vite servers (5173, 3000) and Vercel domains.",
             "impl": "nl2sql-backend/app/main.py -> app.add_middleware(CORSMiddleware, allow_origins=...)",
             "failure": "If an unauthorized domain attempts to make API calls, modern browsers block cross-origin responses at the network layer, preventing unauthorized third-party sites from querying user databases."
+        },
+        {
+            "id": "12",
+            "name": "Schema-Aware Retrieval (RAG) & Dynamic Pruning",
+            "desc": "Indexes table metadata (names, column types, sample values) into an in-memory FAISS vector index using SentenceTransformers ('all-MiniLM-L6-v2'). Dynamically prunes prompt schema to top 3-4 relevant tables for large schemas (> 4 tables) while keeping small demo schemas (<= 4 tables) 100% intact.",
+            "impl": "nl2sql-backend/app/services/rag_service.py -> build_schema_index()<br/>nl2sql-backend/app/services/rag_service.py -> retrieve_relevant_tables()<br/>nl2sql-backend/app/services/sql_generator.py -> generate_sql()<br/>nl2sql-backend/app/services/session_store.py -> set_session()",
+            "failure": "If vector indexing or similarity retrieval encounters any exception or missing index, retrieve_relevant_tables() catches the exception and falls back to returning all tables in the session, guaranteeing zero interruption to SQL generation."
         },
     ]
 

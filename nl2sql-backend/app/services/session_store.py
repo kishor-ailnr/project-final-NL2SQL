@@ -61,10 +61,24 @@ def get_session(session_id: str) -> Optional[Dict[str, Any]]:
 
 
 def set_session(session_id: str, data: Dict[str, Any]) -> None:
-    """Store session data for session_id."""
+    """Store session data for session_id and build its FAISS RAG index."""
     SESSION_STORE[session_id] = data
+    try:
+        from app.services.rag_service import build_schema_index
+        tables = data.get("tables", [])
+        schema = data.get("schema", {})
+        sample_values = data.get("sample_values", {})
+        if tables and schema:
+            build_schema_index(session_id, tables, schema, sample_values)
+    except Exception:
+        pass
 
 
 def remove_session(session_id: str) -> None:
-    """Remove session data."""
+    """Remove session data and any associated RAG vector index."""
     SESSION_STORE.pop(session_id, None)
+    try:
+        from app.services.rag_service import remove_schema_index
+        remove_schema_index(session_id)
+    except Exception:
+        pass

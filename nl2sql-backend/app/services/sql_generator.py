@@ -182,7 +182,30 @@ def generate_sql(session_id: str, nl_question: str, language: str = "auto") -> D
 
     schema = session.get("schema", {})
     sample_values_map = session.get("sample_values")
-    schema_str = _format_schema_for_prompt(schema, sample_values_map)
+
+    # Schema-aware retrieval (RAG): retrieve top 3-4 most relevant tables (or all if <= 4)
+    from app.services.rag_service import retrieve_relevant_tables
+    relevant_tables = retrieve_relevant_tables(session_id, nl_question, top_k=4)
+
+    if relevant_tables and len(relevant_tables) < len(schema):
+        logger.info(
+            "RAG filtered schema for session '%s' from %d tables to %d relevant tables: %s",
+            session_id,
+            len(schema),
+            len(relevant_tables),
+            relevant_tables,
+        )
+        filtered_schema = {tbl: cols for tbl, cols in schema.items() if tbl in relevant_tables}
+        filtered_sample_values = (
+            {tbl: vals for tbl, vals in (sample_values_map or {}).items() if tbl in relevant_tables}
+            if sample_values_map
+            else None
+        )
+    else:
+        filtered_schema = schema
+        filtered_sample_values = sample_values_map
+
+    schema_str = _format_schema_for_prompt(filtered_schema, filtered_sample_values)
 
     detected_lang = detect_input_language(nl_question)
     logger.info("Detected query language for '%s': %s", nl_question, detected_lang)
@@ -281,6 +304,7 @@ Format:
                 data = json.loads(cleaned)
                 _validate_result(data, nl_question)
                 _enforce_language(data, detected_lang, model)
+                data["relevant_tables"] = relevant_tables
                 _WORKING_MODEL = model_name
                 _QUERY_CACHE[cache_key] = data
                 return data
@@ -325,6 +349,7 @@ Output ONLY raw valid JSON without markdown formatting or backticks:
                 retry_data = json.loads(retry_cleaned)
                 _validate_result(retry_data, nl_question)
                 _enforce_language(retry_data, detected_lang, model)
+                retry_data["relevant_tables"] = relevant_tables
                 _WORKING_MODEL = model_name
                 _QUERY_CACHE[cache_key] = retry_data
                 return retry_data
