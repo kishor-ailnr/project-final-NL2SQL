@@ -1,6 +1,10 @@
+import copy
 import difflib
+import hashlib
 import json
+import logging
 import re
+import time
 import warnings
 from typing import Dict, Any, Optional
 from app.config import GEMINI_API_KEY
@@ -9,8 +13,6 @@ from app.services.session_store import get_session
 warnings.filterwarnings("ignore", category=FutureWarning)
 
 import google.generativeai as genai
-
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -28,18 +30,98 @@ MODELS_TO_TRY = [
 # Sticky working model pointer to avoid fallback delays on every call
 _WORKING_MODEL: str = "gemini-3.5-flash-lite"
 
-# In-memory query response cache: cache_key -> {"sql": ..., "explanation": ..., "confidence": ...}
+# ---------------------------------------------------------------------------
+# In-Memory Response Caching (TTL: 10 minutes)
+# Key: SHA-256(schema_signature + normalized_question + language)
+# Value: {"response": Dict[str, Any], "created_at": float}
+# ---------------------------------------------------------------------------
 _QUERY_CACHE: Dict[str, Dict[str, Any]] = {}
+CACHE_TTL_SECONDS: float = 600.0  # 10 minutes
+
+
+def _compute_schema_signature(session: Optional[Dict[str, Any]]) -> str:
+    """Compute a deterministic signature of the session's database schema."""
+    if not session:
+        return "no_session"
+    schema = session.get("schema", {})
+    tables = session.get("tables", [])
+    parts = []
+    for tbl in sorted(schema.keys()):
+        cols = schema[tbl]
+        col_sigs = []
+        for c in cols:
+            if isinstance(c, dict):
+                col_sigs.append(f"{c.get('name')}:{c.get('type')}")
+            else:
+                col_sigs.append(str(c))
+        parts.append(f"{tbl}:({','.join(col_sigs)})")
+    if not parts and tables:
+        parts = [f"tables:{','.join(sorted(tables))}"]
+    raw_sig = "|".join(parts) or "empty_schema"
+    return hashlib.sha256(raw_sig.encode("utf-8")).hexdigest()[:16]
+
+
+def _generate_cache_key(schema_signature: str, question: str, language: str) -> str:
+    """Generate a deterministic SHA-256 cache key from schema, question, and language."""
+    norm_q = " ".join(question.strip().lower().split())
+    norm_lang = (language or "auto").strip().lower()
+    raw = f"{schema_signature}::{norm_q}::{norm_lang}"
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def _get_from_cache(cache_key: str) -> Optional[Dict[str, Any]]:
+    """Retrieve entry from cache if present and not expired; evict on read if expired."""
+    entry = _QUERY_CACHE.get(cache_key)
+    if not entry:
+        return None
+
+    now = time.time()
+    created_at = entry.get("created_at", 0)
+    age = now - created_at
+
+    if age > CACHE_TTL_SECONDS:
+        # Expired: evict on read
+        _QUERY_CACHE.pop(cache_key, None)
+        logger.info(
+            "[Cache EVICT] Evicted expired cache entry %s (age: %.1fs > %ds)",
+            cache_key[:12],
+            age,
+            int(CACHE_TTL_SECONDS),
+        )
+        return None
+
+    logger.info(
+        "[Cache HIT] Reusing cached Gemini response for key %s (age: %.1fs, TTL: %ds)",
+        cache_key[:12],
+        age,
+        int(CACHE_TTL_SECONDS),
+    )
+    return copy.deepcopy(entry["response"])
+
+
+def _put_in_cache(cache_key: str, response_data: Dict[str, Any]) -> None:
+    """Store full Gemini response in the in-memory cache with current timestamp."""
+    _QUERY_CACHE[cache_key] = {
+        "response": copy.deepcopy(response_data),
+        "created_at": time.time(),
+    }
+    logger.info(
+        "[Cache STORE] Cached Gemini response for key %s (TTL: %ds)",
+        cache_key[:12],
+        int(CACHE_TTL_SECONDS),
+    )
 
 
 def clear_query_cache(session_id: Optional[str] = None) -> None:
     """Clear query cache for a specific session or globally."""
-    if session_id:
-        keys_to_del = [k for k in _QUERY_CACHE if k.startswith(f"{session_id}:")]
-        for k in keys_to_del:
-            _QUERY_CACHE.pop(k, None)
-    else:
-        _QUERY_CACHE.clear()
+    count = len(_QUERY_CACHE)
+    _QUERY_CACHE.clear()
+    logger.info("[Cache CLEAR] Cleared %d cached response entries.", count)
+
+
+def get_cache_size() -> int:
+    """Return the number of entries currently stored in the query cache."""
+    return len(_QUERY_CACHE)
 
 
 def _clean_json_string(text: str) -> str:
@@ -173,14 +255,24 @@ def generate_sql(session_id: str, nl_question: str, language: str = "auto") -> D
     """
     global _WORKING_MODEL
 
-    cache_key = f"{session_id}:{nl_question.strip().lower()}"
-    if cache_key in _QUERY_CACHE:
-        logger.info("Serving SQL generation from query cache for: %s", cache_key)
-        return dict(_QUERY_CACHE[cache_key])
-
     session = get_session(session_id)
     if not session:
         raise ValueError(f"Session '{session_id}' not found. Please connect to a database first.")
+
+    # ---------------------------------------------------------------------------
+    # Response Caching: key = SHA256(schema_sig + normalized_question + language)
+    # ---------------------------------------------------------------------------
+    schema_sig = _compute_schema_signature(session)
+    cache_key = _generate_cache_key(schema_sig, nl_question, language)
+
+    cached_resp = _get_from_cache(cache_key)
+    if cached_resp is not None:
+        logger.info(
+            "[Cache HIT] Skipping Gemini API call; reusing cached response for query: '%s' (key: %s)",
+            nl_question,
+            cache_key[:12],
+        )
+        return cached_resp
 
     schema = session.get("schema", {})
     sample_values_map = session.get("sample_values")
@@ -340,7 +432,7 @@ Format:
                 _enforce_language(data, detected_lang, model)
                 data["relevant_tables"] = relevant_tables
                 _WORKING_MODEL = model_name
-                _QUERY_CACHE[cache_key] = data
+                _put_in_cache(cache_key, data)
                 return data
             except Exception as parse_err:
                 logger.warning(
@@ -389,7 +481,7 @@ Output ONLY raw valid JSON without markdown formatting or backticks:
                 _enforce_language(retry_data, detected_lang, model)
                 retry_data["relevant_tables"] = relevant_tables
                 _WORKING_MODEL = model_name
-                _QUERY_CACHE[cache_key] = retry_data
+                _put_in_cache(cache_key, retry_data)
                 return retry_data
 
         except Exception as exc:

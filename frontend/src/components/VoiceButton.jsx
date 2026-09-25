@@ -181,7 +181,6 @@ export default function VoiceButton({
         className="hidden md:inline-block text-[11px] text-slate-400 select-none mr-2 max-w-[195px] leading-tight text-right font-normal"
         title="Voice recognition works best with English and Thanglish. For Tamil, typing is more accurate."
       >
-        Voice works best in English or Thanglish. For Tamil, typing is more accurate.
       </span>
 
       {/* 1. Subtle inline safety-net hint below the input when recognition is low-confidence or fragmented */}

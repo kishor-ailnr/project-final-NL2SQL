@@ -1,11 +1,12 @@
 import logging
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.responses import Response
-from app.config import IS_PRODUCTION
+from starlette.responses import Response, FileResponse
+from starlette.staticfiles import StaticFiles
+from app.config import IS_PRODUCTION, WORKSPACE_DIR
 from app.models.meta_db import init_db
 from app.routers import connect_db, query, conversations
 
@@ -128,4 +129,56 @@ app.include_router(conversations.router, prefix="/api", tags=["Conversations"])
 def health_check():
     """Health check endpoint."""
     return {"status": "ok"}
+
+
+# ---------------------------------------------------------------------------
+# Static Assets & SPA Serving with Cache-Control Headers
+# ---------------------------------------------------------------------------
+class CachedStaticFiles(StaticFiles):
+    """StaticFiles subclass that attaches long-lived Cache-Control headers to hashed assets."""
+
+    def file_response(self, *args, **kwargs) -> Response:
+        response = super().file_response(*args, **kwargs)
+        # Content-hashed assets (Vite generates e.g. index-DSoOfJn_.js) are safe to cache for 1 year
+        response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        return response
+
+
+FRONTEND_DIST = WORKSPACE_DIR / "frontend" / "dist"
+
+if FRONTEND_DIST.exists():
+    assets_dir = FRONTEND_DIST / "assets"
+    if assets_dir.exists():
+        app.mount("/assets", CachedStaticFiles(directory=str(assets_dir)), name="assets")
+
+    @app.get("/{full_path:path}")
+    async def serve_spa_frontend(full_path: str):
+        # Do not intercept API, health, or documentation routes
+        if (
+            full_path.startswith("api/")
+            or full_path == "api"
+            or full_path == "health"
+            or full_path.startswith("docs")
+            or full_path.startswith("openapi.json")
+        ):
+            raise HTTPException(status_code=404, detail="Not found")
+
+        file_path = FRONTEND_DIST / full_path
+        if file_path.is_file():
+            resp = FileResponse(str(file_path))
+            if "/assets/" in str(file_path).replace("\\", "/"):
+                resp.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+            else:
+                resp.headers["Cache-Control"] = "no-cache"
+            return resp
+
+        # Fallback to index.html for Single Page Application client-side routing
+        index_file = FRONTEND_DIST / "index.html"
+        if index_file.is_file():
+            resp = FileResponse(str(index_file))
+            resp.headers["Cache-Control"] = "no-cache"
+            return resp
+
+        raise HTTPException(status_code=404, detail="Frontend build files not found")
+
 
