@@ -34,14 +34,8 @@ jobs:
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           PYTHONPATH: .
-        run: |
-          if [ -n "$GEMINI_API_KEY" ]; then
-            echo "GEMINI_API_KEY is configured — running full test suite (unit + integration)..."
-            python -m pytest --cov=app --cov-report=term-missing
-          else
-            echo "GEMINI_API_KEY not found in secrets — running unit test suite..."
-            python -m pytest -m 'not integration' --cov=app --cov-report=term-missing
-          fi
+        run: python run_tests.py
+
 
   frontend-build:
     name: Frontend Build Check
