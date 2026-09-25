@@ -412,3 +412,158 @@ def _validate_result(data: Any, nl_question: str = "") -> None:
             data["confidence"] = max(conf, 0.5)
         except (ValueError, TypeError):
             data["confidence"] = 0.9
+
+
+def regenerate_sql(
+    session_id: str,
+    original_question: str,
+    failed_sql: str,
+    error_message: str,
+) -> Dict[str, Any]:
+    """Regenerate and fix a failed SQL query using Gemini with explicit failure context.
+
+    Sends the original user question, the failed SQL query, and the exact error message
+    (from sqlglot AST validation or SQLite execution) back to Gemini for self-correction.
+    """
+    global _WORKING_MODEL
+
+    session = get_session(session_id)
+    if not session:
+        raise ValueError(f"Session '{session_id}' not found. Please connect to a database first.")
+
+    schema = session.get("schema", {})
+    sample_values_map = session.get("sample_values")
+
+    # Schema-aware retrieval (RAG)
+    from app.services.rag_service import retrieve_relevant_tables
+    relevant_tables = retrieve_relevant_tables(session_id, original_question, top_k=4)
+
+    if relevant_tables and len(relevant_tables) < len(schema):
+        filtered_schema = {tbl: cols for tbl, cols in schema.items() if tbl in relevant_tables}
+        filtered_sample_values = (
+            {tbl: vals for tbl, vals in (sample_values_map or {}).items() if tbl in relevant_tables}
+            if sample_values_map
+            else None
+        )
+    else:
+        filtered_schema = schema
+        filtered_sample_values = sample_values_map
+
+    schema_str = _format_schema_for_prompt(filtered_schema, filtered_sample_values)
+    detected_lang = detect_input_language(original_question)
+
+    if detected_lang == "tamil":
+        lang_instruction = """The user's question is in: TAMIL SCRIPT. You MUST write the 'explanation' field in Tamil script (தமிழ் எழுத்தில்). Do NOT respond in English."""
+    elif detected_lang == "thanglish":
+        lang_instruction = """The user's question is in: THANGLISH. Write the 'explanation' in English starting with 'Understood — '."""
+    else:
+        lang_instruction = """The user's question is in: ENGLISH. Respond in English as normal."""
+
+    self_check_instruction = """Before finalizing your response, verify: does the corrected SQL fix the exact error specified, and does the 'explanation' match the required language?"""
+
+    prompt = f"""You are an expert SQLite SQL engineer and database analyst.
+A previously generated SQL query failed validation or database execution. Your task is to diagnose the error and provide a corrected, working SQLite query.
+
+Original User Question:
+"{original_question}"
+
+Failed SQL Query:
+{failed_sql}
+
+Exact Error Message:
+{error_message}
+
+Database Schema and Sample Values:
+{schema_str}
+
+Instructions:
+1. Carefully analyze the Error Message and Failed SQL Query:
+   - Check if an invalid column or table name was referenced, and replace it with the exact column/table name from the schema above.
+   - Check if there was a syntax error (e.g. missing commas, misplaced keywords, unclosed quotes, invalid aliases) and fix it.
+   - Ensure all joins match valid foreign keys or column types.
+2. Produce a corrected, fully valid, executable SQLite query that accurately answers the user's question.
+3. Provide a clear, concise explanation of the corrected query.
+4. Output ONLY a single raw valid JSON object without markdown fences, code blocks, or backticks:
+{{
+  "needs_clarification": false,
+  "clarification_question": null,
+  "interpreted_text": "{original_question}",
+  "sql": "SELECT ...",
+  "explanation": "...",
+  "confidence": 0.95
+}}
+
+Language Instruction:
+{lang_instruction}
+
+Self-Check:
+{self_check_instruction}
+"""
+
+    gen_config = {
+        "temperature": 0.0,
+        "max_output_tokens": 800,
+    }
+
+    last_error = None
+    models_to_try = [_WORKING_MODEL] + [m for m in MODELS_TO_TRY if m != _WORKING_MODEL]
+
+    for model_name in models_to_try:
+        try:
+            logger.info("Attempting SQL self-correction with model: %s", model_name)
+            model = genai.GenerativeModel(model_name)
+            response = model.generate_content(prompt, generation_config=gen_config)
+            raw_text = response.text or ""
+            cleaned = _clean_json_string(raw_text)
+
+            try:
+                data = json.loads(cleaned)
+                _validate_result(data, original_question)
+                _enforce_language(data, detected_lang, model)
+                data["relevant_tables"] = relevant_tables
+                _WORKING_MODEL = model_name
+                return data
+            except Exception as parse_err:
+                logger.warning(
+                    "JSON parse error during self-correction with model %s (%s). Retrying...",
+                    model_name,
+                    parse_err,
+                )
+                retry_prompt = f"""Your previous response was not valid JSON.
+Error: {str(parse_err)}
+Database Schema:
+{schema_str}
+
+Output ONLY raw valid JSON:
+{{
+  "needs_clarification": false,
+  "clarification_question": null,
+  "interpreted_text": "{original_question}",
+  "sql": "SELECT ...",
+  "explanation": "...",
+  "confidence": 0.9
+}}
+"""
+                retry_res = model.generate_content(retry_prompt, generation_config=gen_config)
+                retry_cleaned = _clean_json_string(retry_res.text or "")
+                retry_data = json.loads(retry_cleaned)
+                _validate_result(retry_data, original_question)
+                _enforce_language(retry_data, detected_lang, model)
+                retry_data["relevant_tables"] = relevant_tables
+                _WORKING_MODEL = model_name
+                return retry_data
+
+        except Exception as exc:
+            logger.warning(
+                "Self-correction model '%s' failed (error: %s: %s). Trying next fallback model...",
+                model_name,
+                type(exc).__name__,
+                exc,
+            )
+            last_error = exc
+            continue
+
+    if last_error:
+        raise last_error
+    raise RuntimeError("All Gemini model self-correction attempts failed.")
+

@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.models.meta_db import ConversationModel, QueryHistoryModel, get_db_session
-from app.services.sql_generator import generate_sql
+from app.services.sql_generator import generate_sql, regenerate_sql
 from app.services.sql_validator import validate_sql
 from app.services.execution_engine import run_select
 from app.services.session_store import get_session
@@ -97,6 +97,9 @@ class QueryResponse(BaseModel):
     chart_type: str = "none"
     interpreted_text: Optional[str] = None
     detected_language: Optional[str] = None
+    self_corrected: bool = False
+    correction_attempts: int = 0
+
 
 
 class HistoryConversation(BaseModel):
@@ -243,24 +246,134 @@ def handle_query(
             detected_language=detected_lang,
         )
 
-    sql = gen_data.get("sql", "")
-    explanation = gen_data.get("explanation", "")
-    confidence = float(gen_data.get("confidence", 0.9))
+    current_sql = gen_data.get("sql", "")
+    current_explanation = gen_data.get("explanation", "")
+    current_confidence = float(gen_data.get("confidence", 0.9))
 
-    # 2. Validate SQL before execution
-    validation = validate_sql(sql)
-    if not validation.get("valid", False):
-        friendly_message = validation.get("message", "Invalid SQL query.")
+    # Self-Correction Retry Loop: up to 2 retries (original attempt + 2 retries = 3 attempts max)
+    MAX_RETRIES = 2
+    attempt = 0
+    corrections_history: List[Dict[str, Any]] = []
+    self_corrected = False
+    validation: Optional[Dict[str, Any]] = None
+    exec_result: Any = None
+    friendly_message: str = ""
+
+    while attempt <= MAX_RETRIES:
+        # Step A: Validate SQL syntax and safety via sqlglot
+        validation = validate_sql(current_sql)
+        if not validation.get("valid", False):
+            error_msg = validation.get("message", "Invalid SQL syntax.")
+            logger.warning(
+                "[Self-Correction] Attempt %d: SQL validation failed for session '%s'. SQL: '%s' | Error: '%s'",
+                attempt + 1,
+                payload.session_id,
+                current_sql,
+                error_msg,
+            )
+            if attempt < MAX_RETRIES:
+                attempt += 1
+                try:
+                    regen_data = regenerate_sql(
+                        session_id=payload.session_id,
+                        original_question=payload.text,
+                        failed_sql=current_sql,
+                        error_message=error_msg,
+                    )
+                    new_sql = regen_data.get("sql", "")
+                    logger.info(
+                        "[Self-Correction] Retry %d generated corrected SQL: '%s'",
+                        attempt,
+                        new_sql,
+                    )
+                    corrections_history.append({
+                        "attempt": attempt,
+                        "failed_sql": current_sql,
+                        "error": error_msg,
+                        "corrected_sql": new_sql,
+                    })
+                    current_sql = new_sql
+                    current_explanation = regen_data.get("explanation", current_explanation)
+                    current_confidence = float(regen_data.get("confidence", 0.85))
+                    self_corrected = True
+                    continue
+                except Exception as r_exc:
+                    logger.error("[Self-Correction] regenerate_sql call failed: %s", r_exc)
+                    friendly_message = error_msg
+                    break
+            else:
+                friendly_message = error_msg
+                break
+
+        # Step B: Execute SQL against SQLite database
+        exec_result = run_select(payload.session_id, current_sql)
+        if isinstance(exec_result, dict) and "error" in exec_result:
+            error_msg = f"Database query execution failed: {exec_result['error']}"
+            logger.warning(
+                "[Self-Correction] Attempt %d: Database execution failed for session '%s'. SQL: '%s' | Error: '%s'",
+                attempt + 1,
+                payload.session_id,
+                current_sql,
+                error_msg,
+            )
+            if attempt < MAX_RETRIES:
+                attempt += 1
+                try:
+                    regen_data = regenerate_sql(
+                        session_id=payload.session_id,
+                        original_question=payload.text,
+                        failed_sql=current_sql,
+                        error_message=error_msg,
+                    )
+                    new_sql = regen_data.get("sql", "")
+                    logger.info(
+                        "[Self-Correction] Retry %d generated corrected SQL: '%s'",
+                        attempt,
+                        new_sql,
+                    )
+                    corrections_history.append({
+                        "attempt": attempt,
+                        "failed_sql": current_sql,
+                        "error": error_msg,
+                        "corrected_sql": new_sql,
+                    })
+                    current_sql = new_sql
+                    current_explanation = regen_data.get("explanation", current_explanation)
+                    current_confidence = float(regen_data.get("confidence", 0.85))
+                    self_corrected = True
+                    continue
+                except Exception as r_exc:
+                    logger.error("[Self-Correction] regenerate_sql call failed: %s", r_exc)
+                    friendly_message = error_msg
+                    break
+            else:
+                friendly_message = error_msg
+                break
+
+        # Both validation and execution succeeded!
+        break
+
+    # Determine whether the final query succeeded or failed
+    is_failed = (
+        (validation is not None and not validation.get("valid", False))
+        or (isinstance(exec_result, dict) and "error" in exec_result)
+    )
+
+    if is_failed:
+        # Exhausted all retries without success: record failed query and return friendly error
         query_record = QueryHistoryModel(
             session_id=payload.session_id,
             conversation_id=conv.id,
             nl_query=payload.text,
-            generated_sql=sql,
+            generated_sql=current_sql,
             explanation=friendly_message,
             result_json="[]",
             chart_type="none",
             confidence=0.0,
             query_type="select",
+            self_corrected=0,
+            correction_attempts=attempt,
+            corrections_json=json.dumps(corrections_history) if corrections_history else None,
             created_at=datetime.utcnow(),
         )
         db.add(query_record)
@@ -269,7 +382,7 @@ def handle_query(
 
         return QueryResponse(
             query_id=str(query_record.id),
-            sql=sql,
+            sql=current_sql,
             explanation=friendly_message,
             confidence=0.0,
             needs_clarification=False,
@@ -279,53 +392,24 @@ def handle_query(
             chart_type="none",
             interpreted_text=interpreted_text,
             detected_language=detected_lang,
+            self_corrected=False,
+            correction_attempts=attempt,
         )
 
-    # 3. Execute SQL
-    exec_result = run_select(payload.session_id, sql)
-    if isinstance(exec_result, dict) and "error" in exec_result:
-        friendly_message = f"Database query execution failed: {exec_result['error']}"
-        query_record = QueryHistoryModel(
-            session_id=payload.session_id,
-            conversation_id=conv.id,
-            nl_query=payload.text,
-            generated_sql=sql,
-            explanation=friendly_message,
-            result_json="[]",
-            chart_type="none",
-            confidence=0.0,
-            query_type="select",
-            created_at=datetime.utcnow(),
-        )
-        db.add(query_record)
-        db.commit()
-        db.refresh(query_record)
-
-        return QueryResponse(
-            query_id=str(query_record.id),
-            sql=sql,
-            explanation=friendly_message,
-            confidence=0.0,
-            needs_clarification=False,
-            clarification_question=None,
-            query_type="select",
-            result=[],
-            chart_type="none",
-            interpreted_text=interpreted_text,
-            detected_language=detected_lang,
-        )
-
-    # 4. Save successful query to query_history in meta_db
+    # Success (either on first attempt or after self-correction)
     query_record = QueryHistoryModel(
         session_id=payload.session_id,
         conversation_id=conv.id,
         nl_query=payload.text,
-        generated_sql=sql,
-        explanation=explanation,
+        generated_sql=current_sql,
+        explanation=current_explanation,
         result_json=json.dumps(exec_result) if exec_result else "[]",
         chart_type="none",
-        confidence=confidence,
+        confidence=current_confidence,
         query_type="select",
+        self_corrected=1 if self_corrected else 0,
+        correction_attempts=attempt,
+        corrections_json=json.dumps(corrections_history) if corrections_history else None,
         created_at=datetime.utcnow(),
     )
     db.add(query_record)
@@ -334,14 +418,17 @@ def handle_query(
 
     return QueryResponse(
         query_id=str(query_record.id),
-        sql=sql,
-        explanation=explanation,
-        confidence=confidence,
+        sql=current_sql,
+        explanation=current_explanation,
+        confidence=current_confidence,
         needs_clarification=False,
         clarification_question=None,
         query_type="select",
-        result=exec_result,
+        result=exec_result or [],
         chart_type="none",
         interpreted_text=interpreted_text,
         detected_language=detected_lang,
+        self_corrected=self_corrected,
+        correction_attempts=attempt,
     )
+

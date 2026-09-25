@@ -301,7 +301,7 @@ def build_pdf(output_path: str):
     toc_data = [
         [Paragraph("<b>Section</b>", table_header_style), Paragraph("<b>Title & Core Content</b>", table_header_style), Paragraph("<b>Coverage</b>", table_header_style)],
         [Paragraph("<b>Section 1</b>", table_cell_bold), Paragraph("File-by-File Technical Guide", table_cell_style), Paragraph("app/, models/, routers/, services/, scripts/, requirements.txt", table_cell_style)],
-        [Paragraph("<b>Section 2</b>", table_cell_bold), Paragraph("Feature → Code Implementation Map", table_cell_style), Paragraph("12 core features, functions, and 'what-if-fails' recovery analysis", table_cell_style)],
+        [Paragraph("<b>Section 2</b>", table_cell_bold), Paragraph("Feature → Code Implementation Map", table_cell_style), Paragraph("13 core features, functions, and 'what-if-fails' recovery analysis", table_cell_style)],
     ]
     toc_table = Table(toc_data, colWidths=[70, 260, 174])
     toc_table.setStyle(TableStyle([
@@ -420,9 +420,10 @@ def build_pdf(output_path: str):
         "The core natural-language query execution router. It orchestrates session verification, per-session sliding-window rate limiting, "
         "clarification checks, Gemini SQL generation, sqlglot syntax validation, execution dispatch, visualization recommendation, and meta.db recording.",
         [
-            ("POST /api/query", "Main endpoint receiving user queries; handles clarification, generates SQL, validates, executes, and records history."),
+            ("POST /api/query", "Main endpoint receiving user queries; handles clarification, generates SQL, self-correction retry loop, validates, executes, and records history."),
             ("GET /api/history", "Retrieves chronological query history for the active session."),
             ("check_rate_limit(session_id)", "Enforces an in-memory sliding window limit of 20 queries per minute per session, returning HTTP 429 on abuse."),
+            ("Self-Correction Loop", "On validation or database execution errors, automatically invokes regenerate_sql() up to 2 times, returning self_corrected: true."),
         ]
     ))
 
@@ -456,9 +457,11 @@ def build_pdf(output_path: str):
         "nl2sql-backend/app/services/sql_generator.py",
         "The AI reasoning engine powered by Google Gemini. In a single optimized call, it receives schema information with real column sample "
         "values, handles English/Tamil/Thanglish inputs with strict prompt language constraints, evaluates question ambiguity (clarification layer), "
-        "cleans speech-to-text transcript errors (interpreted_text), and outputs strict JSON containing the SQL, explanation, and confidence rating.",
+        "cleans speech-to-text transcript errors (interpreted_text), and outputs strict JSON containing the SQL, explanation, and confidence rating. "
+        "Now includes regenerate_sql() for automated error repair.",
         [
             ("generate_sql(...)", "Constructs grounded prompt with sample values and few-shot Thanglish calibration; returns parsed structured JSON."),
+            ("regenerate_sql(session_id, q, sql, err)", "Self-correction reasoning sending failed query + exact SQLite error message back to Gemini to fix."),
             ("detect_input_language(text)", "Detects Tamil Unicode range (\\u0B80-\\u0BFF), Thanglish lexical patterns, or English."),
             ("_enforce_language(data, lang, model)", "Guarantees strict explanation/clarification language matching with automated Tamil translation fallback."),
             ("generate_title(question, sql)", "Generates a crisp 3-to-5 word chat title from the user's initial question."),
@@ -508,6 +511,7 @@ def build_pdf(output_path: str):
         ("test_phase2.py / test_phase3.py", "Verifies database connection extraction and standalone SQL generator/validator pipeline."),
         ("test_phase5.py", "End-to-end security test suite covering write confirmation gating, audit log recording, and SQL injection blocking."),
         ("test_rag.py", "Verifies schema-aware retrieval (RAG) regression on hospital demo and precision on a 12-table synthetic schema."),
+        ("test_self_correction.py", "Verifies self-correction retry loop on validation/execution errors, audit trail logging, and rate-limiting invariance."),
         ("test_sample_values_and_naming.py", "Tests CSV table sanitization and sample value inclusion in database inspection."),
         ("test_security_audit.py", "Validates audit_log table insertions and query classification integrity."),
         ("test_voice_correction.py", "Verifies that phonetic and speech-to-text transcription errors are corrected in interpreted_text."),
@@ -515,7 +519,7 @@ def build_pdf(output_path: str):
     ]
     story.append(render_file_card(
         "nl2sql-backend/scripts/ (Automated Test Suites)",
-        "A suite of 13 standalone automation and verification scripts that validate all backend layers in isolation and end-to-end.",
+        "A suite of 14 standalone automation and verification scripts that validate all backend layers in isolation and end-to-end.",
         scripts_summary
     ))
 
@@ -631,6 +635,13 @@ def build_pdf(output_path: str):
             "desc": "Indexes table metadata (names, column types, sample values) into an in-memory FAISS vector index using SentenceTransformers ('all-MiniLM-L6-v2'). Dynamically prunes prompt schema to top 3-4 relevant tables for large schemas (> 4 tables) while keeping small demo schemas (<= 4 tables) 100% intact.",
             "impl": "nl2sql-backend/app/services/rag_service.py -> build_schema_index()<br/>nl2sql-backend/app/services/rag_service.py -> retrieve_relevant_tables()<br/>nl2sql-backend/app/services/sql_generator.py -> generate_sql()<br/>nl2sql-backend/app/services/session_store.py -> set_session()",
             "failure": "If vector indexing or similarity retrieval encounters any exception or missing index, retrieve_relevant_tables() catches the exception and falls back to returning all tables in the session, guaranteeing zero interruption to SQL generation."
+        },
+        {
+            "id": "13",
+            "name": "Self-Correction & Automatic Query Repair Loop",
+            "desc": "Catches SQL syntax errors (sqlglot AST) or SQLite execution errors (e.g. 'no such column') and invokes regenerate_sql() with failure context (failed SQL + exact error message). Retries up to 2 times (3 attempts max). Upon success, returns self_corrected: true, correction_attempts: N, and logs full audit trail in meta.db.",
+            "impl": "nl2sql-backend/app/routers/query.py -> handle_query()<br/>nl2sql-backend/app/services/sql_generator.py -> regenerate_sql()<br/>nl2sql-backend/app/models/meta_db.py -> QueryHistoryModel",
+            "failure": "If all 2 retry attempts fail to resolve the error, the system safely falls back to returning the user-friendly execution error message without crashing. Rate limiting counts the entire retry sequence as only 1 request."
         },
     ]
 

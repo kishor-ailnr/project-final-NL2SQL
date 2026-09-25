@@ -52,6 +52,9 @@ class QueryHistoryModel(Base):
     chart_type = Column(String, nullable=True, default="none")
     confidence = Column(Float, nullable=True)
     query_type = Column(String, nullable=True)
+    self_corrected = Column(Integer, default=0, nullable=True)
+    correction_attempts = Column(Integer, default=0, nullable=True)
+    corrections_json = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
 
@@ -119,6 +122,12 @@ def init_db() -> None:
             cur.execute("ALTER TABLE query_history ADD COLUMN result_json TEXT")
         if "chart_type" not in qh_cols:
             cur.execute("ALTER TABLE query_history ADD COLUMN chart_type VARCHAR DEFAULT 'none'")
+        if "self_corrected" not in qh_cols:
+            cur.execute("ALTER TABLE query_history ADD COLUMN self_corrected INTEGER DEFAULT 0")
+        if "correction_attempts" not in qh_cols:
+            cur.execute("ALTER TABLE query_history ADD COLUMN correction_attempts INTEGER DEFAULT 0")
+        if "corrections_json" not in qh_cols:
+            cur.execute("ALTER TABLE query_history ADD COLUMN corrections_json TEXT")
         cur.close()
 
 
