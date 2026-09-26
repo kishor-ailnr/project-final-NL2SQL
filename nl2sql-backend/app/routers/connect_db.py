@@ -7,7 +7,7 @@ from typing import Optional
 from datetime import datetime
 from typing import List, Dict, Any
 from fastapi import APIRouter, HTTPException, Depends, UploadFile, File
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 from sqlalchemy import create_engine, inspect
 from sqlalchemy.orm import Session
 
@@ -25,24 +25,38 @@ router = APIRouter()
 
 class ConnectDBRequest(BaseModel):
     db_type: str = Field(
-        "demo", description="Database type, currently supporting 'demo'"
+        "demo", description="Database type, e.g. 'demo', 'sqlite', 'postgres', 'postgresql'"
     )
     demo_name: Optional[str] = Field(
         "hospital", description="Name of the demo database ('hospital' or 'ecommerce')"
     )
+    connection_string: Optional[str] = Field(
+        None, description="Direct database connection URI or path (e.g. postgresql://user:pass@host/db or sqlite:///path)"
+    )
 
 
 class ConnectDBResponse(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
     session_id: str
     status: str
     tables: List[str]
+    schema_info: Optional[Dict[str, Any]] = Field(default_factory=dict, alias="schema")
 
 
 class SessionStatusResponse(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
     valid: bool
     status: Optional[str] = "connected"
     session_id: Optional[str] = None
     tables: Optional[List[str]] = []
+    schema_info: Optional[Dict[str, Any]] = Field(default_factory=dict, alias="schema")
+
+
+class SchemaResponse(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+    session_id: str
+    tables: List[str]
+    schema_info: Dict[str, Any] = Field(default_factory=dict, alias="schema")
 
 
 def sanitize_table_name(filename: str) -> str:
@@ -114,6 +128,8 @@ def inspect_db_schema_and_samples(
                 col_list.append({
                     "name": col_name,
                     "type": col_type,
+                    "nullable": bool(col.get("nullable", True)),
+                    "primary_key": bool(col.get("primary_key", 0)),
                     "sample_values": samples,
                 })
             schema_info[table] = col_list
@@ -124,6 +140,11 @@ def inspect_db_schema_and_samples(
 
 
 _DEMO_SCHEMA_CACHE: Dict[str, Dict[str, Any]] = {}
+
+
+def clear_demo_cache() -> None:
+    """Clear cached demo schema metadata."""
+    _DEMO_SCHEMA_CACHE.clear()
 
 
 def get_demo_schema(demo_name: str) -> Optional[Dict[str, Any]]:
@@ -163,7 +184,67 @@ def connect_database(
     payload: ConnectDBRequest,
     db: Session = Depends(get_db_session),
 ):
-    """Connect to a demo SQLite database, extract its schema, and initialize a session."""
+    """Connect to a database (demo, direct SQLite, or PostgreSQL), extract schema, and initialize session."""
+    from app.database.manager import DatabaseConnectionManager
+    from app.database.sqlite_adapter import SQLiteAdapter
+
+    # Option A: Direct connection string (PostgreSQL, custom SQLite URI/path)
+    if payload.connection_string:
+        try:
+            adapter = DatabaseConnectionManager.create_adapter(
+                db_type=payload.db_type,
+                connection_string=payload.connection_string,
+            )
+            val = adapter.validate_connection()
+            if not val:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Database connection failed: Unable to connect or query target database.",
+                )
+
+            extracted = adapter.extract_full_schema()
+            table_names = extracted.get("tables", [])
+            schema_info = extracted.get("schema", {})
+            sample_values_map = extracted.get("sample_values", {})
+
+            session_id = str(uuid.uuid4())
+            DatabaseConnectionManager.register_adapter(session_id, adapter)
+
+            session_record = SessionModel(
+                id=session_id,
+                db_type=payload.db_type,
+                connected_at=datetime.utcnow(),
+            )
+            db.add(session_record)
+            db.commit()
+
+            set_session(
+                session_id,
+                {
+                    "db_type": payload.db_type,
+                    "database_url": payload.connection_string,
+                    "tables": table_names,
+                    "schema": schema_info,
+                    "sample_values": sample_values_map,
+                },
+            )
+
+            return ConnectDBResponse(
+                session_id=session_id,
+                status="connected",
+                tables=table_names,
+                schema=schema_info,
+            )
+        except HTTPException:
+            raise
+        except Exception as exc:
+            logger.error("Failed to connect with connection string: %s", exc, exc_info=True)
+            raise HTTPException(
+                status_code=400,
+                detail=f"Failed to connect to database: {str(exc)}",
+            )
+
+    # Option B: Demo SQLite Database
     demo_name = payload.demo_name or "hospital"
     if demo_name not in ["hospital", "ecommerce"]:
         demo_name = "hospital"
@@ -191,6 +272,10 @@ def connect_database(
     db.add(session_record)
     db.commit()
 
+    # Register universal SQLite adapter
+    demo_adapter = SQLiteAdapter(database_url=database_url, db_path=db_path)
+    DatabaseConnectionManager.register_adapter(session_id, demo_adapter)
+
     # Store in memory session store
     set_session(
         session_id,
@@ -209,6 +294,7 @@ def connect_database(
         session_id=session_id,
         status="connected",
         tables=table_names,
+        schema=schema_info,
     )
 
 
@@ -229,6 +315,24 @@ def get_session_status(session_id: str):
         status="connected",
         session_id=session_id,
         tables=session.get("tables", []),
+        schema=session.get("schema", {}),
+    )
+
+
+@router.get("/schema", response_model=SchemaResponse)
+def get_database_schema(session_id: str):
+    """Fetch database schema (table columns, types, primary keys) for a session."""
+    from app.services.session_store import get_session
+    session = get_session(session_id)
+    if not session:
+        raise HTTPException(
+            status_code=404,
+            detail="Active database session not found or expired.",
+        )
+    return SchemaResponse(
+        session_id=session_id,
+        tables=session.get("tables", []),
+        schema=session.get("schema", {}),
     )
 
 
@@ -373,6 +477,12 @@ async def upload_database(
     db.add(session_record)
     db.commit()
 
+    # Register universal SQLite adapter
+    from app.database.manager import DatabaseConnectionManager
+    from app.database.sqlite_adapter import SQLiteAdapter
+    upload_adapter = SQLiteAdapter(database_url=f"sqlite:///{db_path.as_posix()}", db_path=db_path)
+    DatabaseConnectionManager.register_adapter(session_id, upload_adapter)
+
     # Store in memory session store
     set_session(
         session_id,
@@ -391,5 +501,6 @@ async def upload_database(
         session_id=session_id,
         status="connected",
         tables=table_names,
+        schema=schema_info,
     )
 

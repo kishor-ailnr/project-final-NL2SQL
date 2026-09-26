@@ -85,3 +85,38 @@ class TestCleanInputRegression:
         sql = data.get("sql", "")
         assert "patients" in sql.lower()
         assert "40" in sql
+
+
+# ---------------------------------------------------------------------------
+# Data values vs Schema typos (Bug 3)
+# ---------------------------------------------------------------------------
+
+class TestTypoCorrectionVsDataValues:
+    def test_proper_noun_data_value_not_flagged_as_typo(self, client, hospital_sid):
+        """
+        1. 'delete the age of patient Pavai' — corrected_terms must be empty
+        (Pavai should NOT be flagged), and the SQL should correctly reference
+        the literal value 'Pavai' in a WHERE clause.
+        """
+        resp = _query(client, hospital_sid, "delete the age of patient Pavai")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data.get("corrected_terms") == [], f"Expected empty corrected_terms, got: {data.get('corrected_terms')}"
+        sql = data.get("sql", "")
+        assert "Pavai" in sql or "pavai" in sql.lower(), f"Expected 'Pavai' literal in SQL, got: {sql}"
+        assert "WHERE" in sql.upper(), f"Expected WHERE clause in SQL, got: {sql}"
+
+    def test_schema_term_typo_is_flagged(self, client, hospital_sid):
+        """
+        2. 'show me paiens older than 40' — corrected_terms SHOULD still flag
+        'paiens' -> 'patients' (regression check, this is a genuine schema typo).
+        """
+        resp = _query(client, hospital_sid, "show me paiens older than 40")
+        assert resp.status_code == 200
+        data = resp.json()
+        corrected = data.get("corrected_terms", [])
+        assert any(
+            item.get("original", "").lower() == "paiens" and "patient" in item.get("corrected", "").lower()
+            for item in corrected
+        ), f"Expected 'paiens' -> 'patients' correction, got: {corrected}"
+

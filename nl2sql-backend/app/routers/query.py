@@ -41,26 +41,10 @@ _GLOBAL_KEY = "__global__"
 
 
 def generate_conversation_title(question: str) -> str:
-    """Generate a short 3-5 word title summarizing the user question with fast fallback."""
-    def _fallback_title(text: str) -> str:
-        words = text.strip().split()
-        title = " ".join(words[:5]).capitalize()
-        return title[:40]
-
-    try:
-        model = genai.GenerativeModel("gemini-3.5-flash-lite")
-        prompt = (
-            f"Generate a short 3-5 word title summarizing this database question: \"{question}\".\n"
-            "Return ONLY the plain title text (no quotes, no markdown, max 5 words)."
-        )
-        res = model.generate_content(prompt, generation_config={"temperature": 0.2, "max_output_tokens": 20})
-        title = (res.text or "").strip().strip('"\'')
-        if title and len(title) <= 50:
-            return title
-    except Exception as e:
-        logger.warning("Gemini title generation failed (%s). Using fallback title.", e)
-
-    return _fallback_title(question)
+    """Generate a clean 3-5 word title summarizing the user question instantly with zero latency."""
+    words = question.strip().split()
+    title = " ".join(words[:5]).capitalize()
+    return title[:40]
 
 
 def check_rate_limit(session_id: str) -> None:
@@ -129,6 +113,10 @@ def reset_rate_limits() -> None:
     _QUERY_TIMESTAMPS.clear()
 
 
+# In-memory staged write queries: query_id -> dict
+_PENDING_WRITES: Dict[str, Dict[str, Any]] = {}
+
+
 class QueryRequest(BaseModel):
     session_id: str = Field(..., description="ID of the active database session")
     conversation_id: Optional[str] = Field(None, description="UUID of the active conversation")
@@ -153,6 +141,22 @@ class QueryResponse(BaseModel):
     data_available: Optional[bool] = True
     unavailable_message: Optional[str] = None
     corrected_terms: Optional[List[Dict[str, Any]]] = []
+
+
+class ConfirmWriteRequest(BaseModel):
+    session_id: str = Field(..., description="Active database session ID")
+    query_id: str = Field(..., description="ID of the staged write query")
+    confirmed: bool = Field(..., description="True to execute the modification, False to cancel")
+
+
+class ConfirmWriteResponse(BaseModel):
+    status: str = Field(..., description="'executed', 'cancelled', or 'error'")
+    rows_affected: int = Field(0, description="Number of database rows modified")
+    error: Optional[str] = Field(None, description="Error message if execution failed")
+    result: List[Dict[str, Any]] = Field(default_factory=list, description="Rows returned if query included a SELECT statement")
+    chart_type: str = Field("none", description="Suggested visualization type for returned rows")
+    notice: Optional[str] = Field(None, description="Informational notice, e.g. duplicate skipped")
+
 
 
 
@@ -207,9 +211,31 @@ def handle_query(
         except Exception as title_err:
             logger.warning("Could not auto-generate conversation title: %s", title_err)
 
-    # 1. Generate SQL using Gemini (with clarification detection)
+    # Conversational Context for follow-up query awareness
+    conv_context = None
     try:
-        gen_data = generate_sql(payload.session_id, payload.text, language=payload.language)
+        last_history = (
+            db.query(QueryHistoryModel)
+            .filter(QueryHistoryModel.conversation_id == conv.id)
+            .order_by(QueryHistoryModel.created_at.desc())
+            .first()
+        )
+        if last_history and last_history.generated_sql and not last_history.generated_sql.startswith("--"):
+            conv_context = {
+                "previous_question": last_history.nl_query,
+                "previous_sql": last_history.generated_sql,
+            }
+    except Exception as ctx_err:
+        logger.warning("Could not fetch conversation context: %s", ctx_err)
+
+    # 1. Generate SQL using Gemini (with clarification, follow-ups, and write intent detection)
+    try:
+        gen_data = generate_sql(
+            payload.session_id,
+            payload.text,
+            language=payload.language,
+            conversation_context=conv_context,
+        )
     except HTTPException:
         raise
     except Exception as exc:
@@ -329,11 +355,130 @@ def handle_query(
         )
 
 
-    current_sql = gen_data.get("sql", "")
+    current_sql = gen_data.get("sql") or ""
     current_explanation = gen_data.get("explanation", "")
     current_confidence = float(gen_data.get("confidence", 0.9))
+    query_type = gen_data.get("query_type", "select")
+    upper_sql = current_sql.strip().upper()
 
-    # Self-Correction Retry Loop: up to 2 retries (original attempt + 2 retries = 3 attempts max)
+    # Guard: Empty SQL or forbidden DDL statements (DROP, ALTER, TRUNCATE, CREATE)
+    if not current_sql or any(upper_sql.startswith(k) for k in ("DROP", "ALTER", "TRUNCATE", "CREATE")):
+        err_msg = current_explanation or "Schema modification operations (such as DROP or ALTER TABLE) are prohibited."
+        query_record = QueryHistoryModel(
+            session_id=payload.session_id,
+            conversation_id=conv.id,
+            nl_query=payload.text,
+            generated_sql=current_sql or "",
+            explanation=err_msg,
+            result_json="[]",
+            chart_type="none",
+            confidence=0.0,
+            query_type="select",
+            created_at=datetime.utcnow(),
+        )
+        db.add(query_record)
+        db.commit()
+        db.refresh(query_record)
+        return QueryResponse(
+            query_id=str(query_record.id),
+            sql=None,
+            explanation=err_msg,
+            confidence=0.0,
+            needs_clarification=False,
+            clarification_question=None,
+            query_type="select",
+            result=[],
+            chart_type="none",
+            interpreted_text=interpreted_text,
+            detected_language=detected_lang,
+            data_available=True,
+            unavailable_message=None,
+            corrected_terms=corrected_terms,
+        )
+
+    # Controlled Write Operations (INSERT, UPDATE, DELETE) -> stage for user confirmation
+    is_write = query_type == "write" or any(upper_sql.startswith(k) for k in ("INSERT", "UPDATE", "DELETE"))
+
+    if is_write:
+        validation = validate_sql(current_sql, allow_write=True)
+        if not validation.get("valid"):
+            err_msg = validation.get("message", "Invalid SQL write operation.")
+            query_record = QueryHistoryModel(
+                session_id=payload.session_id,
+                conversation_id=conv.id,
+                nl_query=payload.text,
+                generated_sql=current_sql,
+                explanation=err_msg,
+                result_json="[]",
+                chart_type="none",
+                confidence=0.0,
+                query_type="write",
+                created_at=datetime.utcnow(),
+            )
+            db.add(query_record)
+            db.commit()
+            db.refresh(query_record)
+            return QueryResponse(
+                query_id=str(query_record.id),
+                sql=current_sql,
+                explanation=err_msg,
+                confidence=0.0,
+                needs_clarification=False,
+                clarification_question=None,
+                query_type="write",
+                result=[],
+                chart_type="none",
+                interpreted_text=interpreted_text,
+                detected_language=detected_lang,
+                data_available=True,
+                unavailable_message=None,
+                corrected_terms=corrected_terms,
+            )
+
+        # Valid write operation: stage for user confirmation
+        query_record = QueryHistoryModel(
+            session_id=payload.session_id,
+            conversation_id=conv.id,
+            nl_query=payload.text,
+            generated_sql=current_sql,
+            explanation=current_explanation,
+            result_json="[]",
+            chart_type="none",
+            confidence=current_confidence,
+            query_type="write",
+            created_at=datetime.utcnow(),
+        )
+        db.add(query_record)
+        db.commit()
+        db.refresh(query_record)
+
+        qid_str = str(query_record.id)
+        _PENDING_WRITES[qid_str] = {
+            "session_id": payload.session_id,
+            "conversation_id": conv.id,
+            "sql": current_sql,
+            "explanation": current_explanation,
+            "created_at": time.time(),
+        }
+
+        return QueryResponse(
+            query_id=qid_str,
+            sql=current_sql,
+            explanation=current_explanation,
+            confidence=current_confidence,
+            needs_clarification=False,
+            clarification_question=None,
+            query_type="write",
+            result=[],
+            chart_type="none",
+            interpreted_text=interpreted_text,
+            detected_language=detected_lang,
+            data_available=True,
+            unavailable_message=None,
+            corrected_terms=corrected_terms,
+        )
+
+    # Self-Correction Retry Loop for Read (SELECT) queries: up to 2 retries (original attempt + 2 retries = 3 attempts max)
     MAX_RETRIES = 2
     attempt = 0
     corrections_history: List[Dict[str, Any]] = []
@@ -344,7 +489,7 @@ def handle_query(
 
     while attempt <= MAX_RETRIES:
         # Step A: Validate SQL syntax and safety via sqlglot
-        validation = validate_sql(current_sql)
+        validation = validate_sql(current_sql, allow_write=False)
         if not validation.get("valid", False):
             error_msg = validation.get("message", "Invalid SQL syntax.")
             logger.warning(
@@ -519,5 +664,131 @@ def handle_query(
         data_available=True,
         unavailable_message=None,
         corrected_terms=corrected_terms,
+    )
+
+
+@router.post("/confirm-write", response_model=ConfirmWriteResponse)
+def confirm_write(
+    payload: ConfirmWriteRequest,
+    db: Session = Depends(get_db_session),
+):
+    """Confirm or cancel execution of a staged write SQL operation."""
+    # 0. Enforce Rate Limiting (same sliding window as /api/query)
+    check_rate_limit(payload.session_id)
+
+    query_id = str(payload.query_id)
+    pending = _PENDING_WRITES.get(query_id)
+
+    # 1. Validate session ownership from in-memory staged queries
+    if pending:
+        if pending.get("session_id") != payload.session_id:
+            logger.warning(
+                "Unauthorized confirm-write attempt: session '%s' tried to confirm query '%s' belonging to session '%s'",
+                payload.session_id,
+                query_id,
+                pending.get("session_id"),
+            )
+            raise HTTPException(
+                status_code=403,
+                detail="Forbidden: This pending write query belongs to a different session.",
+            )
+
+    if not pending:
+        # Fallback: Query by explicit integer query_id in database history
+        int_qid = int(query_id) if query_id.isdigit() else None
+        hist = db.query(QueryHistoryModel).filter(QueryHistoryModel.id == int_qid).first() if int_qid is not None else None
+
+        if hist:
+            # Enforce session ownership on database history record
+            if hist.session_id != payload.session_id:
+                logger.warning(
+                    "Unauthorized confirm-write attempt: session '%s' tried to confirm query '%s' belonging to session '%s'",
+                    payload.session_id,
+                    query_id,
+                    hist.session_id,
+                )
+                raise HTTPException(
+                    status_code=403,
+                    detail="Forbidden: This pending write query belongs to a different session.",
+                )
+
+            # Check if this write query was already executed (prevents double execution)
+            if hist.result_json and hist.result_json != "[]":
+                return ConfirmWriteResponse(
+                    status="executed",
+                    rows_affected=0,
+                    notice="This write query was already confirmed and executed.",
+                )
+
+            if hist.query_type == "write" and hist.generated_sql and not hist.generated_sql.startswith("--"):
+                pending = {
+                    "session_id": hist.session_id,
+                    "conversation_id": hist.conversation_id,
+                    "sql": hist.generated_sql,
+                    "explanation": hist.explanation or "",
+                    "created_at": time.time(),
+                }
+                query_id = str(hist.id)
+
+    if not pending:
+        raise HTTPException(
+            status_code=404,
+            detail="Pending write query not found or already processed.",
+        )
+
+    # Atomically pop from in-memory staged writes to guarantee single-use execution
+    _PENDING_WRITES.pop(query_id, None)
+
+    if not payload.confirmed:
+        return ConfirmWriteResponse(
+            status="cancelled",
+            rows_affected=0,
+        )
+
+    # Confirmed execution: retrieve SQL server-side from staged pending dict
+    from app.services.execution_engine import run_write
+    from app.services.sql_generator import clear_query_cache
+
+    sql_to_run = pending["sql"]
+    res = run_write(payload.session_id, sql_to_run)
+
+    if not res.get("success", False):
+        err_msg = res.get("error", "Failed to execute database write operation.")
+        return ConfirmWriteResponse(
+            status="error",
+            rows_affected=0,
+            error=err_msg,
+        )
+
+    rows_affected = res.get("rows_affected", 0)
+    result_rows = res.get("result", [])
+    notice = res.get("notice")
+
+    # Invalidate query cache because data changed
+    clear_query_cache(payload.session_id)
+
+    # Automatically advise visualization chart type if SELECT rows were returned
+    chart_type = "none"
+    if result_rows:
+        try:
+            from app.services.chart_advisor import advise_chart_type
+            chart_type = advise_chart_type(result_rows, pending["sql"])
+        except Exception as chart_err:
+            logger.warning("Chart advisor error on confirm_write: %s", chart_err)
+            chart_type = "table"
+
+    # Update query history with execution result
+    hist = db.query(QueryHistoryModel).filter(QueryHistoryModel.id == query_id).first()
+    if hist:
+        hist.result_json = json.dumps(result_rows if result_rows else [{"status": "success", "rows_affected": rows_affected}])
+        hist.chart_type = chart_type
+        db.commit()
+
+    return ConfirmWriteResponse(
+        status="executed",
+        rows_affected=rows_affected,
+        result=result_rows,
+        chart_type=chart_type,
+        notice=notice,
     )
 

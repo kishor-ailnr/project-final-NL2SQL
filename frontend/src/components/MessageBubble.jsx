@@ -24,6 +24,10 @@ export default function MessageBubble({
   sql = null,
   queryData = null,
   onViewSQL = null,
+  onLearnSQL = null,
+  onConfirmWrite = null,
+  onCancelWrite = null,
+  originalQuestion = '',
   timestamp = '',
   children = null,
 }) {
@@ -251,7 +255,7 @@ export default function MessageBubble({
   // -------------------------------------------------------------
   const isComplexAnswer = Boolean(resolvedSql || queryData);
 
-  // Simple assistant conversational message (e.g. welcome message, status notice)
+  // Simple assistant conversational message (e.g. welcome message, status notice, write execution result)
   if (!isComplexAnswer) {
     return (
       <motion.div
@@ -260,10 +264,11 @@ export default function MessageBubble({
         transition={{ duration: 0.2 }}
         className="flex w-full my-2 sm:my-2.5 justify-start"
       >
-        <div className="max-w-[96%] sm:max-w-[92%] md:max-w-[88%] flex flex-col items-start">
-          <div className="px-3.5 py-2.5 sm:px-4 sm:py-3 text-sm leading-relaxed shadow-2xs break-words bg-white border border-slate-200/80 text-slate-800 rounded-2xl rounded-bl-xs">
+        <div className="w-full max-w-full sm:max-w-[96%] md:max-w-[92%] flex flex-col items-start">
+          <div className={`px-3.5 py-2.5 sm:px-4 sm:py-3 text-sm leading-relaxed shadow-2xs break-words ${content?.startsWith('⚠️') ? 'bg-amber-50/95 border border-amber-200 text-amber-900 font-medium' : 'bg-white border border-slate-200/80 text-slate-800'} rounded-2xl rounded-bl-xs`}>
             {content}
           </div>
+          {children}
           {timestamp && (
             <span className="text-[10px] text-slate-400 mt-1 px-1 font-sans">
               {timestamp}
@@ -300,8 +305,22 @@ export default function MessageBubble({
               </span>
 
               {isWriteQuery && (
-                <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-100 text-amber-900 border border-amber-300 shrink-0">
-                  Write Operation (Pending)
+                <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold shrink-0 border ${
+                  queryData?.status === 'executed' || (!queryData?.isPendingWrite && (queryData?.rows_affected !== undefined || queryData?.result?.length))
+                    ? 'bg-emerald-100 text-emerald-900 border-emerald-300'
+                    : queryData?.status === 'cancelled'
+                    ? 'bg-slate-100 text-slate-700 border-slate-300'
+                    : queryData?.status === 'failed'
+                    ? 'bg-rose-100 text-rose-900 border-rose-300'
+                    : 'bg-amber-100 text-amber-900 border-amber-300'
+                }`}>
+                  {queryData?.status === 'executed' || (!queryData?.isPendingWrite && (queryData?.rows_affected !== undefined || queryData?.result?.length))
+                    ? 'Write Operation (Executed)'
+                    : queryData?.status === 'cancelled'
+                    ? 'Write Operation (Cancelled)'
+                    : queryData?.status === 'failed'
+                    ? 'Write Operation (Failed)'
+                    : 'Write Operation (Pending)'}
                 </span>
               )}
             </div>
@@ -327,18 +346,96 @@ export default function MessageBubble({
                   <span>View SQL</span>
                 </button>
               )}
+
+              {/* Learn SQL Educational Modal Trigger Button (Only when SQL exists) */}
+              {resolvedSql && onLearnSQL && (
+                <button
+                  type="button"
+                  onClick={() =>
+                    onLearnSQL({
+                      sql: resolvedSql,
+                      explanation: resolvedExplanation,
+                      queryData,
+                      rawContent,
+                      content,
+                      originalQuestion: originalQuestion || queryData?.user_question,
+                      result: (queryData?.result && queryData.result.length > 0) ? queryData.result : [],
+                      rows_affected: queryData?.rows_affected,
+                      isPendingWrite: isWriteQuery,
+                      notice: queryData?.notice,
+                    })
+                  }
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-indigo-50 hover:bg-indigo-100/80 border border-indigo-200/70 text-indigo-800 text-xs font-semibold transition-all shadow-2xs group min-h-[30px]"
+                  title="Learn how your question became SQL"
+                >
+                  <svg className="w-3.5 h-3.5 text-indigo-600 font-bold shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
+                  </svg>
+                  <span>Learn SQL</span>
+                </button>
+              )}
             </div>
           </div>
 
+          {/* Execution Status Banner (when confirmed, cancelled, or failed) */}
+          {queryData?.executionStatus && (
+            <div className={`mb-2.5 p-2.5 rounded-xl text-xs sm:text-sm font-medium border whitespace-pre-line ${
+              queryData.status === 'executed'
+                ? 'bg-emerald-50/90 text-emerald-900 border-emerald-200'
+                : queryData.status === 'failed'
+                ? 'bg-rose-50/90 text-rose-900 border-rose-200'
+                : 'bg-amber-50/90 text-amber-900 border-amber-200'
+            }`}>
+              {queryData.executionStatus}
+            </div>
+          )}
+
           {/* Explanation Text */}
           {resolvedExplanation ? (
-            <p className="text-xs sm:text-sm text-slate-700 leading-relaxed font-normal">
-              {resolvedExplanation}
-            </p>
+            resolvedExplanation.startsWith('⚠️') ? (
+              <div className="p-3 rounded-xl bg-amber-50/90 border border-amber-200 text-amber-900 text-xs sm:text-sm leading-relaxed font-medium whitespace-pre-line">
+                {resolvedExplanation}
+              </div>
+            ) : (
+              <p className="text-xs sm:text-sm text-slate-700 leading-relaxed font-normal whitespace-pre-line">
+                {resolvedExplanation}
+              </p>
+            )
           ) : (
             <p className="text-xs sm:text-sm text-slate-500 italic">
               Query executed successfully.
             </p>
+          )}
+
+          {/* Pending Write Operation Action Banner (Confirm & Execute / Cancel) */}
+          {isWriteQuery && (queryData?.isPendingWrite || queryData?.status === 'pending') && (
+            <div className="mt-3 p-3 rounded-xl bg-amber-50/95 border border-amber-200/90 flex flex-wrap items-center justify-between gap-2.5 shadow-2xs">
+              <div className="flex items-center gap-2">
+                <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></span>
+                <span className="text-xs font-semibold text-amber-900">
+                  Approval Required: This write query will modify records in your database.
+                </span>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => onCancelWrite && onCancelWrite(queryData)}
+                  className="px-3 py-1.5 rounded-xl text-xs font-semibold text-slate-700 hover:text-slate-900 bg-white hover:bg-slate-100 border border-slate-300 transition-all shadow-2xs cursor-pointer min-h-[30px]"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onConfirmWrite && onConfirmWrite(queryData)}
+                  className="px-3.5 py-1.5 rounded-xl text-xs font-semibold text-white bg-amber-600 hover:bg-amber-700 transition-all shadow-2xs flex items-center gap-1.5 cursor-pointer min-h-[30px]"
+                >
+                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M5 13l4 4L19 7" />
+                  </svg>
+                  <span>Confirm & Execute</span>
+                </button>
+              </div>
+            </div>
           )}
         </div>
 

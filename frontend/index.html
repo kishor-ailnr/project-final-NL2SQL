@@ -5,6 +5,47 @@
     <link rel="icon" type="image/png" href="/logo.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>NL2SQL — AI Query Engine</title>
+    <script>
+      // Early guard: silently suppress benign HTMLMediaElement play() interruptions from Chrome extensions or WebRTC
+      (function() {
+        if (typeof window !== 'undefined') {
+          if (typeof HTMLMediaElement !== 'undefined' && HTMLMediaElement.prototype) {
+            var origPlay = HTMLMediaElement.prototype.play;
+            HTMLMediaElement.prototype.play = function() {
+              try {
+                var p = origPlay.apply(this, arguments);
+                if (p && typeof p.then === 'function') {
+                  // Immediately mark native promise handled in V8 engine
+                  p.catch(function() {});
+                  return p.catch(function(err) {
+                    if (err && (err.name === 'AbortError' || (String(err).indexOf('pause') !== -1))) {
+                      return;
+                    }
+                    return Promise.reject(err);
+                  });
+                }
+                return p;
+              } catch (e) {
+                if (e && (e.name === 'AbortError' || (String(e).indexOf('pause') !== -1))) {
+                  return Promise.resolve();
+                }
+                throw e;
+              }
+            };
+          }
+          window.addEventListener('unhandledrejection', function(event) {
+            var r = event ? (event.reason || event) : null;
+            var str = String(r || '');
+            if ((r && r.name === 'AbortError') || str.indexOf('interrupted by a call to pause') !== -1 || str.indexOf('AbortError') !== -1) {
+              event.preventDefault();
+              if (typeof event.stopImmediatePropagation === 'function') {
+                event.stopImmediatePropagation();
+              }
+            }
+          }, true);
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

@@ -20,15 +20,16 @@ logger = logging.getLogger(__name__)
 if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY, transport="rest")
 
-# Prioritized list of active Gemini models (fastest first)
+# Prioritized list of active Gemini models (fastest and available first)
 MODELS_TO_TRY = [
-    "gemini-3.5-flash-lite",
-    "gemini-3.5-flash",
     "gemini-3.1-flash-lite",
+    "gemini-flash-latest",
+    "gemini-3.5-flash-lite",
+    "gemini-3.6-flash",
 ]
 
 # Sticky working model pointer to avoid fallback delays on every call
-_WORKING_MODEL: str = "gemini-3.5-flash-lite"
+_WORKING_MODEL: str = "gemini-3.1-flash-lite"
 
 # ---------------------------------------------------------------------------
 # In-Memory Response Caching (TTL: 10 minutes)
@@ -61,11 +62,11 @@ def _compute_schema_signature(session: Optional[Dict[str, Any]]) -> str:
     return hashlib.sha256(raw_sig.encode("utf-8")).hexdigest()[:16]
 
 
-def _generate_cache_key(schema_signature: str, question: str, language: str) -> str:
-    """Generate a deterministic SHA-256 cache key from schema, question, and language."""
+def _generate_cache_key(schema_signature: str, question: str, language: str, context_sig: str = "") -> str:
+    """Generate a deterministic SHA-256 cache key from schema, question, language, and context."""
     norm_q = " ".join(question.strip().lower().split())
     norm_lang = (language or "auto").strip().lower()
-    raw = f"{schema_signature}::{norm_q}::{norm_lang}"
+    raw = f"{schema_signature}::{norm_q}::{norm_lang}::{context_sig}"
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
@@ -112,8 +113,8 @@ def _put_in_cache(cache_key: str, response_data: Dict[str, Any]) -> None:
     )
 
 
-def clear_query_cache() -> None:
-    """Clear query cache globally."""
+def clear_query_cache(session_id: Optional[str] = None) -> None:
+    """Clear query cache globally or for a specific session."""
     count = len(_QUERY_CACHE)
     _QUERY_CACHE.clear()
     logger.info("[Cache CLEAR] Cleared %d cached response entries.", count)
@@ -151,6 +152,13 @@ def _format_schema_for_prompt(schema: Dict[str, Any], sample_values_map: Optiona
         for c in cols:
             col_name = c.get("name", "")
             col_type = c.get("type", "")
+            constraints = []
+            if c.get("primary_key"):
+                constraints.append("PRIMARY KEY")
+            if c.get("nullable") is False:
+                constraints.append("NOT NULL")
+            constraints_str = f", {', '.join(constraints)}" if constraints else ""
+
             samples = c.get("sample_values")
             if not samples and sample_values_map and table in sample_values_map:
                 samples = sample_values_map[table].get(col_name)
@@ -158,14 +166,14 @@ def _format_schema_for_prompt(schema: Dict[str, Any], sample_values_map: Optiona
             if samples:
                 samples_str = ", ".join(repr(s) if isinstance(s, str) else str(s) for s in samples)
                 if col_type:
-                    col_strs.append(f"{col_name} ({col_type}, sample values: {samples_str})")
+                    col_strs.append(f"{col_name} ({col_type}{constraints_str}, sample values: {samples_str})")
                 else:
-                    col_strs.append(f"{col_name} (sample values: {samples_str})")
+                    col_strs.append(f"{col_name} (sample values: {samples_str}{constraints_str})")
             else:
                 if col_type:
-                    col_strs.append(f"{col_name} ({col_type})")
+                    col_strs.append(f"{col_name} ({col_type}{constraints_str})")
                 else:
-                    col_strs.append(col_name)
+                    col_strs.append(f"{col_name}{constraints_str}")
         schema_lines.append(f"Table '{table}': {', '.join(col_strs)}")
     return "\n".join(schema_lines)
 
@@ -241,13 +249,19 @@ def _enforce_language(data: Dict[str, Any], detected_lang: str, model: Optional[
                 data["clarification_question"] = "தயவுசெய்து உங்கள் கேள்வியை மேலும் தெளிவுபடுத்தவும்."
 
 
-def generate_sql(session_id: str, nl_question: str, language: str = "auto") -> Dict[str, Any]:
-    """Generate SQL from natural language question using Gemini with clarification and model fallback.
-    
+def generate_sql(
+    session_id: str,
+    nl_question: str,
+    language: str = "auto",
+    conversation_context: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Generate SQL from natural language question using Gemini with clarification, follow-ups, and model fallback.
+
     Returns:
         dict: {
             "needs_clarification": bool,
             "clarification_question": Optional[str],
+            "query_type": str,  # 'select' or 'write'
             "sql": Optional[str],
             "explanation": Optional[str],
             "confidence": float
@@ -260,10 +274,15 @@ def generate_sql(session_id: str, nl_question: str, language: str = "auto") -> D
         raise ValueError(f"Session '{session_id}' not found. Please connect to a database first.")
 
     # ---------------------------------------------------------------------------
-    # Response Caching: key = SHA256(schema_sig + normalized_question + language)
+    # Response Caching: key = SHA256(schema_sig + normalized_question + language + context)
     # ---------------------------------------------------------------------------
     schema_sig = _compute_schema_signature(session)
-    cache_key = _generate_cache_key(schema_sig, nl_question, language)
+    context_sig = (
+        f"{conversation_context.get('previous_question', '')}::{conversation_context.get('previous_sql', '')}"
+        if conversation_context
+        else ""
+    )
+    cache_key = _generate_cache_key(schema_sig, nl_question, language, context_sig)
 
     cached_resp = _get_from_cache(cache_key)
     if cached_resp is not None:
@@ -313,6 +332,18 @@ def generate_sql(session_id: str, nl_question: str, language: str = "auto") -> D
 
     self_check_instruction = """Before finalizing your response, verify: does the 'explanation' field match the required language above? If not, rewrite it in the correct language before responding."""
 
+    # Contextual awareness snippet for follow-up queries
+    context_instruction = ""
+    if conversation_context and conversation_context.get("previous_question"):
+        prev_q = conversation_context.get("previous_question", "")
+        prev_sql = conversation_context.get("previous_sql", "")
+        context_instruction = f"""
+5. Conversational Follow-Up Context:
+   - Previous question: "{prev_q}"
+   - Previous generated SQL: "{prev_sql}"
+   - If the current user question is a follow-up or refinement (e.g., "what about last month?", "only for females", "by product"), interpret it in the context of the previous query and build upon or adjust the previous SQL logic.
+"""
+
     base_prompt = f"""You are an expert SQLite SQL engineer and database analyst.
 Given the following SQLite database schema:
 {schema_str}
@@ -334,8 +365,12 @@ Instructions:
    - The user's input may come from speech recognition, which occasionally mishears words (for example: "shom me pashents older then fourty").
    - Always return an "interpreted_text" field in the JSON response with the corrected sentence.
    - If you corrected any misspelled or phonetically misheard words between the user's input and "interpreted_text", provide them in "corrected_terms" as a list of {{"original": "misheard_word", "corrected": "fixed_word"}}.
-   - Example: [{{"original": "paiens", "corrected": "patients"}}, {{"original": "fourty", "corrected": "forty"}}]
-   - If no words were corrected, return [].
+   - CRITICAL RULES FOR corrected_terms:
+     - corrected_terms must ONLY correct words that closely match actual schema terms (table names, column names from the connected database, or common query vocabulary like "top", "average", "delete").
+     - If a word could plausibly be a data value (a proper noun, a name, capitalized mid-sentence, or simply doesn't closely resemble any schema term), it must NOT be included in corrected_terms, even if it superficially resembles a schema word.
+     - EXACT CALIBRATION EXAMPLE: "Pavai" in "delete the age of patient Pavai" is a person's name (a data value), NOT a misspelling of "patients" — do NOT flag it in corrected_terms, keep "Pavai" intact in interpreted_text, and reference the literal value 'Pavai' in a WHERE clause.
+     - Example valid schema correction: [{{"original": "paiens", "corrected": "patients"}}, {{"original": "fourty", "corrected": "forty"}}]
+   - If no schema words were corrected, return [].
    - Base your SQL generation on this corrected "interpreted_text".
 
 3. Clarification & Ambiguity Assessment (ONLY IF data IS available in the schema):
@@ -351,8 +386,32 @@ Instructions:
    - Thanglish calibrations:
      - "40 vayasuku mela patients kaatu" means "show/list patients older than 40".
      - "doctor ellam list pannu" means "list all doctors".
+{context_instruction}
+6. Multi-Statement Queries & Controlled Write Operations:
+   - Schema-destructive DDL operations (DROP TABLE, DROP DATABASE, ALTER TABLE, TRUNCATE, CREATE) are STRICTLY FORBIDDEN and dangerous. If the user asks to drop, delete tables, or alter schema, DO NOT generate a DROP or DDL statement. Set "sql": null, set "explanation": "Dropping tables or modifying database schema is strictly prohibited.", set "query_type": "select", "confidence": 0.0.
+   - Multiple queries separated by semicolons (;) are fully supported.
+   - If the user asks to insert, update, or delete data AND also asks to return, show, list, or view data (e.g. "Add patient X ... and return the full patients table", "Insert new appointment ... and show appointments"):
+     - You MUST generate BOTH statements in sequence separated by a semicolon (;).
+     - Example: INSERT INTO patients (name, age, gender, diagnosis, admission_date) VALUES ('Prem', 8, 'Male', 'Headache', '2026-04-23'); SELECT * FROM patients;
+     - Set "query_type": "write".
+     - In "explanation", explicitly mention both operations (adding the record and retrieving the table).
+   - If the user asks to "delete / remove / clear the <column> of <entity>" (e.g. "delete the age of the patient pavai", "remove diagnosis of patient 3", "clear city of customer John"):
+     - This is an attribute clearing operation, NOT a row or table deletion!
+     - You MUST generate an UPDATE query setting that specific column to NULL:
+       e.g. UPDATE patients SET age = NULL WHERE LOWER(name) = 'pavai';
+     - Do NOT generate a DELETE query unless the user specifically asks to delete the record/patient/row itself.
+     - ALWAYS use case-insensitive matching (e.g. LOWER(name) = 'pavai' or name LIKE 'Pavai') to ensure the row matches regardless of casing.
+     - Set "query_type": "write".
+   - If the user only asks to modify data (without asking to return/view data):
+     - Generate the appropriate INSERT, UPDATE, or DELETE query.
+     - For UPDATE and DELETE: You MUST ALWAYS include a precise WHERE clause targeting only the requested rows.
+     - Set "query_type": "write".
+   - If the user asks multiple read queries (e.g. "Count of patients and count of doctors"):
+     - You can generate multiple SELECT statements separated by a semicolon: e.g. SELECT COUNT(*) AS total_patients FROM patients; SELECT COUNT(*) AS total_doctors FROM doctors;
+     - Set "query_type": "select".
+   - For all read-only queries, set "query_type": "select".
 
-5. Output Structure Rules:
+7. Output Structure Rules:
    - If "data_available" is false:
      - "data_available": false
      - "unavailable_message": a calm informational message
@@ -360,6 +419,7 @@ Instructions:
      - "needs_clarification": false
      - "clarification_question": null
      - "interpreted_text": the corrected/cleaned input question
+     - "query_type": "select"
      - "sql": null
      - "explanation": null
      - "confidence": 0.85
@@ -370,6 +430,7 @@ Instructions:
      - "needs_clarification": true
      - "clarification_question": a short, specific, polite question asking the user to clarify the ambiguity.
      - "interpreted_text": the corrected/cleaned version of the input question.
+     - "query_type": "select"
      - "sql": null
      - "explanation": null
      - "confidence": a float below 0.5 (e.g. 0.2 or 0.3)
@@ -380,8 +441,9 @@ Instructions:
      - "needs_clarification": false
      - "clarification_question": null
      - "interpreted_text": the corrected/cleaned version of the input question.
-     - "sql": a valid, executable SQLite query that accurately answers the question based on the interpreted text.
-     - "explanation": a concise explanation of how the query answers the question.
+     - "query_type": "write" if any statement performs an insert/update/delete, otherwise "select"
+     - "sql": valid, executable SQLite query statement(s) (use semicolons if multiple statements were requested) that accurately answer the question based on the interpreted text.
+     - "explanation": a concise explanation of how the query operates.
      - "confidence": a float between 0.7 and 1.0.
 
 User Question to Answer:
@@ -402,6 +464,7 @@ Format:
   "needs_clarification": false,
   "clarification_question": null,
   "interpreted_text": "the corrected/cleaned version of the input",
+  "query_type": "select",
   "sql": "SELECT ...",
   "explanation": "...",
   "confidence": 0.95
@@ -422,7 +485,11 @@ Format:
         try:
             logger.info("Attempting SQL generation with model: %s", model_name)
             model = genai.GenerativeModel(model_name)
-            response = model.generate_content(base_prompt, generation_config=gen_config)
+            response = model.generate_content(
+                base_prompt,
+                generation_config=gen_config,
+                request_options={"timeout": 30.0},
+            )
             raw_text = response.text or ""
             cleaned = _clean_json_string(raw_text)
 
@@ -448,7 +515,7 @@ Database Schema:
 Instructions:
 1. FIRST check if the requested entity/data exists in the schema. If absent, set "data_available": false, provide "unavailable_message", set sql to null, needs_clarification: false. Do not ask for clarification if data does not exist in schema.
 2. Determine if the question needs clarification (ONLY IF data exists in schema: e.g. ranking word without metric and limit on existing tables).
-3. Fix speech-to-text mistakes in interpreted_text and list {{"original", "corrected"}} pairs in corrected_terms.
+3. Fix speech-to-text mistakes in interpreted_text and list {{"original", "corrected"}} pairs in corrected_terms ONLY for schema keywords or SQL terms (never person names, proper nouns, or data values like 'Pavai').
 4. If needs_clarification is true, set sql to null, explanation to null, confidence < 0.5, and provide a short clarification_question.
 5. If valid and available, generate valid SQLite in sql, explanation, confidence >= 0.5.
 
@@ -586,19 +653,29 @@ def _validate_result(data: Any, nl_question: str = "", schema: Optional[Dict[str
     else:
         data["unavailable_message"] = None
 
-    # Normalize corrected_terms
+    # Normalize corrected_terms (ensure proper nouns, names, and data values are not flagged as typos)
     corrected_terms = data.get("corrected_terms")
     valid_pairs = []
+    sql_text = str(data.get("sql") or "").lower()
     if isinstance(corrected_terms, list):
         for item in corrected_terms:
             if isinstance(item, dict) and "original" in item and "corrected" in item:
                 orig = str(item["original"]).strip()
                 corr = str(item["corrected"]).strip()
                 if orig and corr and orig.lower() != corr.lower():
+                    # Safeguard: Do not flag names or data values that appear as literal values in the generated SQL
+                    orig_l = orig.lower()
+                    if f"'{orig_l}'" in sql_text or f'"{orig_l}"' in sql_text or f"%{orig_l}%" in sql_text:
+                        continue
                     valid_pairs.append({"original": orig, "corrected": corr})
     # If model did not output pairs but input was corrected, derive automatically
     if not valid_pairs and data.get("interpreted_text") and nl_question:
-        valid_pairs = _extract_word_corrections(nl_question, data["interpreted_text"])
+        extracted = _extract_word_corrections(nl_question, data["interpreted_text"])
+        for p in extracted:
+            orig_l = p["original"].lower()
+            if f"'{orig_l}'" in sql_text or f'"{orig_l}"' in sql_text or f"%{orig_l}%" in sql_text:
+                continue
+            valid_pairs.append(p)
     data["corrected_terms"] = valid_pairs
 
     if not data_available:
@@ -632,13 +709,32 @@ def _validate_result(data: Any, nl_question: str = "", schema: Optional[Dict[str
             data["confidence"] = 0.3
         else:
             data["sql"] = sql.strip()
-            explanation = data.get("explanation")
-            data["explanation"] = explanation.strip() if isinstance(explanation, str) else ""
-            try:
-                conf = float(data.get("confidence", 0.9))
-                data["confidence"] = max(conf, 0.5)
-            except (ValueError, TypeError):
-                data["confidence"] = 0.9
+            upper_sql = data["sql"].upper()
+            if any(upper_sql.startswith(k) for k in ("DROP", "ALTER", "TRUNCATE", "CREATE")):
+                data["sql"] = None
+                data["explanation"] = "Schema modification operations (such as DROP or ALTER TABLE) are prohibited."
+                data["confidence"] = 0.0
+                data["query_type"] = "select"
+            elif upper_sql.startswith("INSERT") or upper_sql.startswith("UPDATE") or upper_sql.startswith("DELETE"):
+                data["query_type"] = "write"
+                explanation = data.get("explanation")
+                data["explanation"] = explanation.strip() if isinstance(explanation, str) else ""
+                try:
+                    conf = float(data.get("confidence", 0.9))
+                    data["confidence"] = max(conf, 0.5)
+                except (ValueError, TypeError):
+                    data["confidence"] = 0.9
+            else:
+                data["query_type"] = data.get("query_type", "select")
+                if data["query_type"] not in ("select", "write"):
+                    data["query_type"] = "select"
+                explanation = data.get("explanation")
+                data["explanation"] = explanation.strip() if isinstance(explanation, str) else ""
+                try:
+                    conf = float(data.get("confidence", 0.9))
+                    data["confidence"] = max(conf, 0.5)
+                except (ValueError, TypeError):
+                    data["confidence"] = 0.9
 
 
 def regenerate_sql(

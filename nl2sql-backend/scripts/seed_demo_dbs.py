@@ -30,10 +30,10 @@ def seed_hospital_db():
         CREATE TABLE patients (
             id INTEGER PRIMARY KEY,
             name TEXT NOT NULL,
-            age INTEGER NOT NULL,
-            gender TEXT NOT NULL,
-            diagnosis TEXT NOT NULL,
-            admission_date TEXT NOT NULL
+            age INTEGER,
+            gender TEXT,
+            diagnosis TEXT,
+            admission_date TEXT
         );
         """
     )
@@ -148,8 +148,8 @@ def seed_ecommerce_db():
             id INTEGER PRIMARY KEY,
             name TEXT NOT NULL,
             email TEXT NOT NULL UNIQUE,
-            city TEXT NOT NULL,
-            signup_date TEXT NOT NULL
+            city TEXT,
+            signup_date TEXT
         );
         """
     )
@@ -159,7 +159,7 @@ def seed_ecommerce_db():
         CREATE TABLE products (
             id INTEGER PRIMARY KEY,
             name TEXT NOT NULL,
-            category TEXT NOT NULL,
+            category TEXT,
             price REAL NOT NULL,
             stock INTEGER NOT NULL
         );

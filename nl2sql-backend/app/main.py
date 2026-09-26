@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response, FileResponse
 from starlette.staticfiles import StaticFiles
-from app.config import IS_PRODUCTION, WORKSPACE_DIR
+from app.config import IS_PRODUCTION, WORKSPACE_DIR, FRONTEND_DIST
 from app.models.meta_db import init_db
 from app.routers import connect_db, query, conversations
 
@@ -143,7 +143,6 @@ class CachedStaticFiles(StaticFiles):
         return response
 
 
-FRONTEND_DIST = WORKSPACE_DIR / "frontend" / "dist"
 
 if FRONTEND_DIST.exists():
     assets_dir = FRONTEND_DIST / "assets"

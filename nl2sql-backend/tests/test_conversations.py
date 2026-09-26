@@ -149,3 +149,26 @@ class TestConversationHistory:
         resp = client.get(f"/api/conversations/{conv_id}/messages")
         messages = resp.json().get("messages", [])
         assert len(messages) >= 1
+
+    def test_follow_up_query_preserves_context(self, client, hospital_sid):
+        conv_id = client.post("/api/conversations/new", json={"session_id": hospital_sid}).json()["conversation_id"]
+        # Turn 1
+        resp1 = client.post("/api/query", json={
+            "session_id": hospital_sid,
+            "conversation_id": conv_id,
+            "text": "list all patients with diabetes",
+            "language": "auto",
+        })
+        assert resp1.status_code == 200
+        # Turn 2: Follow-up query using previous context
+        resp2 = client.post("/api/query", json={
+            "session_id": hospital_sid,
+            "conversation_id": conv_id,
+            "text": "what about hypertension instead?",
+            "language": "auto",
+        })
+        assert resp2.status_code == 200
+        data2 = resp2.json()
+        assert data2.get("sql") is not None
+        assert "patients" in data2.get("sql", "").lower()
+

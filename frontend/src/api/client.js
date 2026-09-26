@@ -1,6 +1,9 @@
 import axios from 'axios';
 
-const BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
+// In production unified deployment, default to same-origin ('') if VITE_API_BASE_URL is empty or not set
+const BASE_URL = import.meta.env.VITE_API_BASE_URL !== undefined
+  ? import.meta.env.VITE_API_BASE_URL
+  : (import.meta.env.DEV ? 'http://localhost:8000' : '');
 
 const api = axios.create({
   baseURL: BASE_URL,
@@ -155,9 +158,21 @@ export async function uploadDB(file) {
         'Content-Type': 'multipart/form-data',
       },
     });
-    return response.data; // { session_id, status, tables }
+    return response.data; // { session_id, status, tables, schema }
   } catch (err) {
     throw formatError(err, 'Failed to upload and parse database file.');
   }
 }
+
+export async function getDatabaseSchema(session_id) {
+  try {
+    const response = await api.get('/api/schema', {
+      params: { session_id },
+    });
+    return response.data; // { session_id, tables, schema }
+  } catch (err) {
+    throw formatError(err, 'Failed to fetch database schema.');
+  }
+}
+
 

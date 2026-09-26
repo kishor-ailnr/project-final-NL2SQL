@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, startTransition } from 'react';
 import { motion } from 'framer-motion';
 import MessageBubble from './MessageBubble';
 import VoiceButton from './VoiceButton';
@@ -7,6 +7,7 @@ import ChartPanel from './ChartPanel';
 import ConfirmModal from './ConfirmModal';
 import HistorySidebar from './HistorySidebar';
 import SQLDrawer from './SQLDrawer';
+import LearnSQLModal from './LearnSQLModal';
 import {
   sendQuery,
   confirmWrite,
@@ -14,6 +15,7 @@ import {
   getConversations,
   getConversationMessages,
   deleteConversation,
+  getDatabaseSchema,
 } from '../api/client';
 import { AiLoadingState } from './lightswind/ai-loading-state';
 
@@ -32,7 +34,68 @@ export default function ChatWindow({ session, onDisconnect }) {
   const [inputValue, setInputValue] = useState('');
   const [isPending, setIsPending] = useState(false);
   const [showTables, setShowTables] = useState(false);
+  const [selectedTable, setSelectedTable] = useState(null);
+  const [schemaData, setSchemaData] = useState(session?.schema || session?.schema_info || {});
+  const [schemaLoading, setSchemaLoading] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+
+  // Sync or fetch database schema metadata (table columns, types)
+  useEffect(() => {
+    if (session?.schema && Object.keys(session.schema).length > 0) {
+      setSchemaData(session.schema);
+    } else if (session?.schema_info && Object.keys(session.schema_info).length > 0) {
+      setSchemaData(session.schema_info);
+    } else if (sessionId && sessionId !== 'N/A') {
+      getDatabaseSchema(sessionId)
+        .then((data) => {
+          if (data?.schema && Object.keys(data.schema).length > 0) {
+            setSchemaData(data.schema);
+          }
+        })
+        .catch((err) => {
+          console.warn('Could not prefetch database schema:', err.message);
+        });
+    }
+  }, [sessionId, session]);
+
+  // Handle clicking on an individual table pill to toggle its headers/columns
+  const handleToggleTable = async (tableName) => {
+    if (selectedTable === tableName) {
+      // Toggle closed if clicked again
+      setSelectedTable(null);
+      return;
+    }
+
+    setSelectedTable(tableName);
+
+    // If columns for this table are not yet cached in state, fetch them
+    if (!schemaData[tableName] && sessionId && sessionId !== 'N/A') {
+      setSchemaLoading(true);
+      try {
+        const data = await getDatabaseSchema(sessionId);
+        if (data?.schema) {
+          setSchemaData(data.schema);
+        }
+      } catch (err) {
+        console.warn('Failed to fetch schema for table:', tableName, err.message);
+      } finally {
+        setSchemaLoading(false);
+      }
+    }
+  };
+
+  // Active columns for currently selected table
+  const activeTableColumns = (schemaData?.[selectedTable] || []).map((col) => {
+    if (typeof col === 'string') {
+      return { name: col, type: 'TEXT', primary_key: false };
+    }
+    return {
+      name: col.name || col.column_name || String(col),
+      type: col.type || 'TEXT',
+      primary_key: Boolean(col.primary_key),
+      nullable: col.nullable !== false,
+    };
+  });
 
   // Multi-conversation state
   const [conversations, setConversations] = useState([]);
@@ -44,27 +107,41 @@ export default function ChatWindow({ session, onDisconnect }) {
   const [activeSQLQuery, setActiveSQLQuery] = useState(null);
   const [isSQLDrawerOpen, setIsSQLDrawerOpen] = useState(false);
 
+  // Learn SQL Modal state (educational dialog)
+  const [activeLearnSQLData, setActiveLearnSQLData] = useState(null);
+  const [isLearnSQLModalOpen, setIsLearnSQLModalOpen] = useState(false);
+
   // Confirm Modal state for Write operations
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [pendingWriteQuery, setPendingWriteQuery] = useState(null);
 
   const messagesEndRef = useRef(null);
   const textareaRef = useRef(null);
+  const isSendingRef = useRef(false);
 
   const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    requestAnimationFrame(() => {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    });
   };
 
   useEffect(() => {
     scrollToBottom();
   }, [messages, isPending]);
 
-  // Auto-resize textarea to fit multiline content up to max-height
+  // Auto-resize textarea to fit multiline content up to max-height without synchronous layout thrashing
   useEffect(() => {
-    if (textareaRef.current) {
-      textareaRef.current.style.height = 'auto';
-      textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 140)}px`;
+    const el = textareaRef.current;
+    if (!el) return;
+    if (typeof CSS !== 'undefined' && CSS.supports && CSS.supports('field-sizing', 'content')) {
+      return;
     }
+    requestAnimationFrame(() => {
+      if (!el) return;
+      el.style.height = 'auto';
+      const targetHeight = Math.min(el.scrollHeight, 140);
+      el.style.height = `${Math.max(38, targetHeight)}px`;
+    });
   }, [inputValue]);
 
   // Load conversations on session mount
@@ -161,8 +238,13 @@ export default function ChatWindow({ session, onDisconnect }) {
         formatted.push({
           id: `asst-${convId}-${idx}`,
           role: 'assistant',
+          userQuestion: m.nl_query,
           queryData: {
             query_id: `msg-${convId}-${idx}`,
+            user_question: m.nl_query,
+            query_type: m.query_type || 'select',
+            status: m.query_type === 'write' ? 'executed' : undefined,
+            isPendingWrite: false,
             sql: m.sql,
             explanation: m.explanation,
             result: m.result || [],
@@ -214,10 +296,16 @@ export default function ChatWindow({ session, onDisconnect }) {
     setIsSQLDrawerOpen(true);
   };
 
+  const handleOpenLearnSQL = (learnData) => {
+    setActiveLearnSQLData(learnData);
+    setIsLearnSQLModalOpen(true);
+  };
+
   const handleSend = async (e) => {
     if (e) e.preventDefault();
     const text = inputValue.trim();
-    if (!text || isPending) return;
+    if (!text || isPending || isSendingRef.current) return;
+    isSendingRef.current = true;
 
     let targetConvId = activeConversationId;
     if (!targetConvId) {
@@ -271,17 +359,32 @@ export default function ChatWindow({ session, onDisconnect }) {
         );
       }
 
+      const isWrite = queryResponse.query_type === 'write';
       const assistantMessage = {
         id: `asst-${Date.now()}`,
         role: 'assistant',
-        queryData: queryResponse,
+        userQuestion: text,
+        queryData: {
+          ...queryResponse,
+          user_question: text,
+          isPendingWrite: isWrite,
+          status: isWrite ? 'pending' : undefined,
+        },
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       };
 
-      setMessages((prev) => [...prev, assistantMessage]);
+      setMessages((prev) => {
+        if (queryResponse?.query_id && prev.some((m) => m.queryData?.query_id === queryResponse.query_id)) {
+          return prev;
+        }
+        return [...prev, assistantMessage];
+      });
 
-      if (queryResponse.query_type === 'write') {
-        setPendingWriteQuery(queryResponse);
+      if (isWrite) {
+        setPendingWriteQuery({
+          ...queryResponse,
+          user_question: text,
+        });
         setIsModalOpen(true);
       }
 
@@ -298,46 +401,125 @@ export default function ChatWindow({ session, onDisconnect }) {
       setMessages((prev) => [...prev, errorMessage]);
     } finally {
       setIsPending(false);
+      isSendingRef.current = false;
     }
   };
 
-  const handleConfirmWrite = async () => {
+  const handleConfirmWrite = async (targetQuery = pendingWriteQuery) => {
+    const activeQuery = targetQuery || pendingWriteQuery;
+    const queryId = activeQuery?.query_id;
+    if (!queryId) return;
+
     try {
       const res = await confirmWrite({
         session_id: sessionId,
-        query_id: pendingWriteQuery?.query_id,
+        query_id: queryId,
         confirmed: true,
       });
 
-      setIsModalOpen(false);
-      const executionMessage = {
-        id: `exec-${Date.now()}`,
-        role: 'assistant',
-        content: `✅ Executed — ${res?.rows_affected ?? 0} rows affected.`,
-        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      };
-      setMessages((prev) => [...prev, executionMessage]);
-      setPendingWriteQuery(null);
+      startTransition(() => {
+        setIsModalOpen(false);
+
+        if (res?.status === 'error') {
+          const errContent = `❌ Write Execution Failed: ${res?.error || 'Database operation failed.'}`;
+          setMessages((prev) =>
+            prev.map((msg) => {
+              const isTarget =
+                msg.queryData?.query_id === queryId ||
+                (msg.role === 'assistant' && msg.queryData?.query_type === 'write' && msg.queryData?.isPendingWrite);
+              if (!isTarget) return msg;
+
+              return {
+                ...msg,
+                content: errContent,
+                queryData: {
+                  ...msg.queryData,
+                  status: 'failed',
+                  isPendingWrite: false,
+                  executionStatus: errContent,
+                  rows_affected: 0,
+                  result: [],
+                  error: res?.error,
+                },
+              };
+            })
+          );
+          setPendingWriteQuery(null);
+          return;
+        }
+
+        let statusContent = `✅ Executed — ${res?.rows_affected ?? 0} row${res?.rows_affected === 1 ? '' : 's'} affected.`;
+        if (res?.rows_affected === 0) {
+          statusContent = res?.notice 
+            ? `⚠️ ${res.notice}` 
+            : '⚠️ Executed — 0 rows affected. No matching record was found to update.';
+        } else if (res?.notice) {
+          statusContent = `✅ Executed — ${res.rows_affected} row${res.rows_affected === 1 ? '' : 's'} affected.\n⚠️ ${res.notice}`;
+        }
+
+        // Update the existing pending message in place rather than appending a duplicate card
+        setMessages((prev) =>
+          prev.map((msg) => {
+            const isTarget =
+              msg.queryData?.query_id === queryId ||
+              (msg.role === 'assistant' && msg.queryData?.query_type === 'write' && msg.queryData?.isPendingWrite);
+            if (!isTarget) return msg;
+
+            return {
+              ...msg,
+              content: statusContent,
+              queryData: {
+                ...msg.queryData,
+                status: 'executed',
+                isPendingWrite: false,
+                executionStatus: statusContent,
+                rows_affected: res?.rows_affected,
+                result: res?.result || [],
+                chart_type: res?.chart_type || (res?.result?.length ? 'table' : 'none'),
+                notice: res?.notice,
+              },
+            };
+          })
+        );
+        setPendingWriteQuery(null);
+      });
     } catch (err) {
       console.warn('confirmWrite API error:', err.message);
-      setIsModalOpen(false);
-      const errorMessage = {
-        id: `err-${Date.now()}`,
-        role: 'assistant',
-        content: `❌ Write Execution Failed: ${err.message}`,
-        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      };
-      setMessages((prev) => [...prev, errorMessage]);
-      setPendingWriteQuery(null);
+      startTransition(() => {
+        setIsModalOpen(false);
+        const errContent = `❌ Write Execution Failed: ${err.message}`;
+        setMessages((prev) =>
+          prev.map((msg) => {
+            const isTarget =
+              msg.queryData?.query_id === queryId ||
+              (msg.role === 'assistant' && msg.queryData?.query_type === 'write' && msg.queryData?.isPendingWrite);
+            if (!isTarget) return msg;
+
+            return {
+              ...msg,
+              content: errContent,
+              queryData: {
+                ...msg.queryData,
+                status: 'failed',
+                isPendingWrite: false,
+                executionStatus: errContent,
+              },
+            };
+          })
+        );
+        setPendingWriteQuery(null);
+      });
     }
   };
 
-  const handleCancelWrite = async () => {
-    if (pendingWriteQuery?.query_id) {
+  const handleCancelWrite = async (targetQuery = pendingWriteQuery) => {
+    const activeQuery = targetQuery || pendingWriteQuery;
+    const queryId = activeQuery?.query_id;
+    if (queryId) {
       try {
         await confirmWrite({
           session_id: sessionId,
-          query_id: pendingWriteQuery.query_id,
+          query_id: queryId,
           confirmed: false,
         });
       } catch (err) {
@@ -345,21 +527,36 @@ export default function ChatWindow({ session, onDisconnect }) {
       }
     }
 
-    setIsModalOpen(false);
-    const cancelMessage = {
-      id: `cancel-${Date.now()}`,
-      role: 'assistant',
-      content: 'Query cancelled. No changes were made to the database.',
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-    };
-    setMessages((prev) => [...prev, cancelMessage]);
-    setPendingWriteQuery(null);
+    startTransition(() => {
+      setIsModalOpen(false);
+      const cancelContent = '⚠️ Query cancelled. No changes were made to the database.';
+      setMessages((prev) =>
+        prev.map((msg) => {
+          const isTarget =
+            msg.queryData?.query_id === queryId ||
+            (msg.role === 'assistant' && msg.queryData?.query_type === 'write' && msg.queryData?.isPendingWrite);
+          if (!isTarget) return msg;
+
+          return {
+            ...msg,
+            content: cancelContent,
+            queryData: {
+              ...msg.queryData,
+              status: 'cancelled',
+              isPendingWrite: false,
+              executionStatus: cancelContent,
+            },
+          };
+        })
+      );
+      setPendingWriteQuery(null);
+    });
   };
 
   const handleKeyDown = (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      handleSend();
+      handleSend(e);
     }
   };
 
@@ -444,8 +641,14 @@ export default function ChatWindow({ session, onDisconnect }) {
             {/* Toggleable Table List Pills */}
             <button
               type="button"
-              onClick={() => setShowTables(!showTables)}
-              className="text-xs font-medium text-teal-700 hover:text-teal-900 flex items-center gap-1 bg-teal-50/60 px-2.5 py-1 rounded-lg border border-teal-200/60 transition-colors shrink-0 min-h-[32px]"
+              onClick={() => {
+                setShowTables((prev) => {
+                  const next = !prev;
+                  if (!next) setSelectedTable(null);
+                  return next;
+                });
+              }}
+              className="text-xs font-medium text-teal-700 hover:text-teal-900 flex items-center gap-1 bg-teal-50/60 hover:bg-teal-100/70 px-2.5 py-1 rounded-lg border border-teal-200/60 transition-colors shrink-0 min-h-[32px] cursor-pointer"
               title="Toggle database table list"
             >
               <span className="whitespace-nowrap">{tables.length} tables</span>
@@ -468,22 +671,148 @@ export default function ChatWindow({ session, onDisconnect }) {
           </button>
         </div>
 
-        {/* Collapsible Tables Drawer */}
+        {/* Collapsible Tables Drawer & Headers */}
         {showTables && (
           <motion.div
             initial={{ opacity: 0, height: 0 }}
             animate={{ opacity: 1, height: 'auto' }}
             exit={{ opacity: 0, height: 0 }}
-            className="mt-2.5 pt-2 border-t border-slate-100 flex flex-wrap gap-1.5 max-h-32 overflow-y-auto"
+            transition={{ duration: 0.18 }}
+            className="mt-2.5 pt-2 border-t border-slate-100 flex flex-col gap-2.5"
           >
-            {tables.map((table, idx) => (
-              <span
-                key={idx}
-                className="px-2.5 py-0.5 rounded-md text-[11px] font-mono bg-slate-50 text-slate-700 border border-slate-200 shadow-2xs"
-              >
-                {table}
+            {/* Table Name Chips (Clickable to view/hide headers) */}
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider mr-1">
+                Tables:
               </span>
-            ))}
+              {tables.map((table, idx) => {
+                const isSelected = selectedTable === table;
+                const colCount = schemaData?.[table]?.length;
+
+                return (
+                  <button
+                    key={idx}
+                    type="button"
+                    onClick={() => handleToggleTable(table)}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-mono transition-all flex items-center gap-1.5 shadow-2xs cursor-pointer border ${
+                      isSelected
+                        ? 'bg-teal-600 text-white border-teal-700 shadow-xs ring-2 ring-teal-500/25 font-semibold'
+                        : 'bg-white hover:bg-teal-50/80 text-slate-700 hover:text-teal-900 border-slate-200 hover:border-teal-300'
+                    }`}
+                    title={isSelected ? `Click to hide headers of ${table}` : `Click to view headers of ${table}`}
+                  >
+                    {/* Database Table Icon */}
+                    <svg
+                      className={`w-3.5 h-3.5 shrink-0 ${isSelected ? 'text-teal-100' : 'text-slate-400'}`}
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth="2"
+                        d="M3 10h18M3 14h18m-9-4v8m-7 4h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"
+                      />
+                    </svg>
+                    <span>{table}</span>
+                    {typeof colCount === 'number' && colCount > 0 && (
+                      <span
+                        className={`text-[10px] px-1.5 py-0.2 rounded-full font-sans font-medium ${
+                          isSelected
+                            ? 'bg-teal-700/90 text-teal-100'
+                            : 'bg-slate-100 text-slate-500'
+                        }`}
+                      >
+                        {colCount}
+                      </span>
+                    )}
+                    {/* Dropdown Caret */}
+                    <svg
+                      className={`w-3 h-3 transition-transform duration-150 ${
+                        isSelected ? 'rotate-180 text-white' : 'text-slate-400'
+                      }`}
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" />
+                    </svg>
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Expanded Table Headers / Columns Section */}
+            {selectedTable && (
+              <motion.div
+                initial={{ opacity: 0, y: -4 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -4 }}
+                transition={{ duration: 0.15 }}
+                className="p-3 rounded-xl bg-gradient-to-r from-slate-50 via-teal-50/40 to-slate-50 border border-teal-200/80 shadow-2xs backdrop-blur-xs"
+              >
+                <div className="flex items-center justify-between gap-2 mb-2 pb-1.5 border-b border-teal-100">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="w-2 h-2 rounded-full bg-teal-500 animate-pulse"></span>
+                    <span className="text-xs font-semibold text-slate-800">
+                      Headers of table <span className="font-mono text-teal-700 font-bold bg-teal-100/70 px-1.5 py-0.5 rounded text-[11px]">{selectedTable}</span>:
+                    </span>
+                    <span className="text-[11px] text-slate-500 font-sans">
+                      ({activeTableColumns.length} {activeTableColumns.length === 1 ? 'header' : 'headers'})
+                    </span>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => setSelectedTable(null)}
+                    className="text-[11px] font-semibold text-slate-500 hover:text-slate-800 flex items-center gap-1 px-2 py-0.5 rounded-md hover:bg-slate-200/60 transition-colors"
+                    title="Close table headers"
+                  >
+                    <span>Close</span>
+                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                </div>
+
+                {schemaLoading ? (
+                  <div className="flex items-center gap-2 py-2 text-xs text-slate-500">
+                    <span className="w-3.5 h-3.5 border-2 border-teal-600 border-t-transparent rounded-full animate-spin"></span>
+                    <span>Loading headers...</span>
+                  </div>
+                ) : activeTableColumns.length === 0 ? (
+                  <p className="text-xs text-slate-500 italic py-1">
+                    No headers found for table '{selectedTable}'.
+                  </p>
+                ) : (
+                  <div className="flex flex-wrap gap-1.5 max-h-48 overflow-y-auto pt-0.5">
+                    {activeTableColumns.map((col, cIdx) => (
+                      <div
+                        key={cIdx}
+                        className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs bg-white border border-slate-200/90 hover:border-teal-400 hover:shadow-2xs transition-all select-all font-mono"
+                        title={`${col.name} (${col.type})${col.primary_key ? ' - Primary Key' : ''}`}
+                      >
+                        <span className="font-semibold text-slate-800 text-[11px]">
+                          {col.name}
+                        </span>
+                        <span className="text-[9px] font-sans font-bold uppercase px-1.5 py-0.2 rounded bg-slate-100 text-slate-500 border border-slate-200/60">
+                          {col.type}
+                        </span>
+                        {col.primary_key && (
+                          <span
+                            className="text-[9px] font-sans font-bold px-1.5 py-0.2 rounded bg-amber-100 text-amber-800 border border-amber-300"
+                            title="Primary Key"
+                          >
+                            PK
+                          </span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </motion.div>
+            )}
           </motion.div>
         )}
       </div>
@@ -523,27 +852,49 @@ export default function ChatWindow({ session, onDisconnect }) {
                   clarificationQuestion={msg.queryData.clarification_question}
                   confidence={msg.queryData.confidence}
                   sql={msg.queryData.sql}
+                  originalQuestion={msg.userQuestion || msg.queryData?.user_question}
                   onViewSQL={handleOpenSQL}
+                  onLearnSQL={handleOpenLearnSQL}
+                  onConfirmWrite={handleConfirmWrite}
+                  onCancelWrite={handleCancelWrite}
                   timestamp={msg.timestamp}
                 >
-                  {/* Table / Chart Result Display: only when data is available and not clarification / write */}
-                  {!isClarif && !isWrite && !isUnavailable && (
+                  {/* Table / Chart Result Display: when data is available, not clarification, and results exist */}
+                  {!isClarif && !isUnavailable && msg.queryData.result && msg.queryData.result.length > 0 && (
                     <ChartPanel
                       result={msg.queryData.result}
-                      chart_type={msg.queryData.chart_type}
+                      chart_type={msg.queryData.chart_type || 'table'}
                     />
                   )}
                 </MessageBubble>
               );
             }
 
+            // Execution messages or general assistant messages with result table
+            const hasDirectResults = Array.isArray(msg.result) && msg.result.length > 0;
             return (
               <MessageBubble
                 key={msg.id}
                 role="assistant"
                 content={msg.content}
+                sql={msg.sql}
+                originalQuestion={msg.userQuestion || msg.queryData?.user_question}
+                queryData={msg.queryData}
+                onViewSQL={msg.sql ? handleOpenSQL : undefined}
+                onLearnSQL={msg.sql ? handleOpenLearnSQL : undefined}
+                onConfirmWrite={handleConfirmWrite}
+                onCancelWrite={handleCancelWrite}
                 timestamp={msg.timestamp}
-              />
+              >
+                {hasDirectResults && (
+                  <div className="w-full mt-3">
+                    <ChartPanel
+                      result={msg.result}
+                      chart_type={msg.chart_type || 'table'}
+                    />
+                  </div>
+                )}
+              </MessageBubble>
             );
           })}
 
@@ -614,12 +965,22 @@ export default function ChatWindow({ session, onDisconnect }) {
 
             </div>
           </form>
-          {/* Always-visible input capability hint */}
-          <p className="text-center text-[11px] text-slate-400/80 mt-1 select-none font-normal">
-            Voice works best in English or Thanglish. For Tamil, typing is more accurate.
-          </p>
         </div>
       </div>
+
+      {/* SQL Drawer Slide-in */}
+      <SQLDrawer
+        isOpen={isSQLDrawerOpen}
+        queryData={activeSQLQuery}
+        onClose={() => setIsSQLDrawerOpen(false)}
+      />
+
+      {/* Learn SQL Educational Modal */}
+      <LearnSQLModal
+        isOpen={isLearnSQLModalOpen}
+        data={activeLearnSQLData}
+        onClose={() => setIsLearnSQLModalOpen(false)}
+      />
 
       {/* Confirm Modal Overlay for Write Operations */}
       <ConfirmModal

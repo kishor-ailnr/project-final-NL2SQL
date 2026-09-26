@@ -86,3 +86,9 @@ html, body {
   -ms-overflow-style: none;
   scrollbar-width: none;
 }
+
+/* Native zero-reflow dynamic textarea expansion in modern Chromium */
+textarea {
+  field-sizing: content;
+}
+

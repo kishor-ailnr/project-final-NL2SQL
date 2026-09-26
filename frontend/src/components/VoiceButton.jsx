@@ -176,12 +176,7 @@ export default function VoiceButton({
 
   return (
     <div className="relative inline-flex items-center shrink-0">
-      {/* 2. Small always-visible hint text near the mic button setting correct upfront expectations */}
-      <span
-        className="hidden md:inline-block text-[11px] text-slate-400 select-none mr-2 max-w-[195px] leading-tight text-right font-normal"
-        title="Voice recognition works best with English and Thanglish. For Tamil, typing is more accurate."
-      >
-      </span>
+
 
       {/* 1. Subtle inline safety-net hint below the input when recognition is low-confidence or fragmented */}
       {lowConfidenceHint && (

@@ -126,7 +126,11 @@ class TestInjectionBlocked:
         assert result["valid"] is False
 
     def test_multiple_semicolons(self):
-        assert _valid("SELECT 1; SELECT 2; SELECT 3;") is False
+        assert _valid("SELECT 1; SELECT 2; SELECT 3;") is True
+
+    def test_multiple_statements_with_forbidden_stacked_injection(self):
+        assert _valid("SELECT 1; DROP TABLE patients;") is False
+        assert _reason("SELECT 1; DROP TABLE patients;") == "injection_detected"
 
 
 # ---------------------------------------------------------------------------
@@ -158,3 +162,46 @@ class TestEdgeCases:
     def test_select_with_block_comment_syntax_inside_string_literal(self):
         sql = "SELECT * FROM patients WHERE diagnosis = '/* pending review */'"
         assert _valid(sql) is True
+
+
+# ---------------------------------------------------------------------------
+# Controlled Write Operations (allow_write=True)
+# ---------------------------------------------------------------------------
+
+class TestControlledWriteOperations:
+    def test_insert_permitted_when_allow_write_true(self):
+        res = validate_sql("INSERT INTO patients (name, age) VALUES ('John Doe', 30)", allow_write=True)
+        assert res["valid"] is True
+        assert res.get("statement_type") == "insert"
+        assert res.get("is_write") is True
+
+    def test_update_with_where_permitted_when_allow_write_true(self):
+        res = validate_sql("UPDATE patients SET age = 31 WHERE id = 1", allow_write=True)
+        assert res["valid"] is True
+        assert res.get("statement_type") == "update"
+        assert res.get("is_write") is True
+
+    def test_update_without_where_rejected(self):
+        res = validate_sql("UPDATE patients SET age = 31", allow_write=True)
+        assert res["valid"] is False
+        assert res.get("reason") == "missing_where_clause"
+
+    def test_delete_with_where_permitted_when_allow_write_true(self):
+        res = validate_sql("DELETE FROM appointments WHERE id = 5", allow_write=True)
+        assert res["valid"] is True
+        assert res.get("statement_type") == "delete"
+        assert res.get("is_write") is True
+
+    def test_delete_without_where_rejected(self):
+        res = validate_sql("DELETE FROM appointments", allow_write=True)
+        assert res["valid"] is False
+        assert res.get("reason") == "missing_where_clause"
+
+    def test_ddl_drop_table_rejected_even_when_allow_write_true(self):
+        res = validate_sql("DROP TABLE patients", allow_write=True)
+        assert res["valid"] is False
+
+    def test_multi_statement_write_rejected(self):
+        res = validate_sql("UPDATE patients SET age = 30 WHERE id = 1; DROP TABLE doctors;", allow_write=True)
+        assert res["valid"] is False
+        assert res.get("reason") == "injection_detected"

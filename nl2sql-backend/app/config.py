@@ -8,6 +8,18 @@ WORKSPACE_DIR = BASE_DIR.parent
 DATA_DIR = BASE_DIR / "data"
 META_DB_PATH = DATA_DIR / "meta.db"
 
+# Frontend dist directory with Docker / production fallbacks
+FRONTEND_DIST_ENV = os.getenv("FRONTEND_DIST_DIR")
+if FRONTEND_DIST_ENV and Path(FRONTEND_DIST_ENV).exists():
+    FRONTEND_DIST = Path(FRONTEND_DIST_ENV)
+else:
+    FRONTEND_DIST = WORKSPACE_DIR / "frontend" / "dist"
+    if not FRONTEND_DIST.exists():
+        for candidate in [BASE_DIR / "frontend" / "dist", BASE_DIR / "dist", Path("/app/frontend/dist")]:
+            if candidate.exists():
+                FRONTEND_DIST = candidate
+                break
+
 # Ensure data directory exists
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
